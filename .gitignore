@@ -4,3 +4,4 @@ state/
 __pycache__/
 keys.env
 calls-dry.csv
+STOP

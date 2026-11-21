@@ -217,7 +217,11 @@ def track():
     for x in rs:
         if x["status"] not in ("open",) and not x["status"].startswith("hit"): continue
         q = pair(x["contract"]); mc = float((q or {}).get("marketCap") or 0)
+        liq_now = float(((q or {}).get("liquidity") or {}).get("usd") or 0); m5 = float(((q or {}).get("priceChange") or {}).get("m5") or 0)
+        if not q or liq_now < 1000 or m5 <= -80:      # liquidity pulled / price collapsed: it is a rug, never a "result"
+            x["status"] = "rugged"; x["current_mcap"] = 0; x["multiple"] = 0.0; continue
         x["current_mcap"] = mc; x["multiple"] = round(mc / float(x["mcap_at_call"]), 2)
+        if liq_now < 5000 or x["multiple"] > 1000: continue   # untrustworthy numbers: no milestone posts
         hit = [m for m in CFG["result_milestones"] if x["multiple"] >= m]
         done = int(x["status"].split("x")[0][3:] or 0) if x["status"].startswith("hit") else 0
         if hit and hit[-1] > done:  # post once per new milestone
