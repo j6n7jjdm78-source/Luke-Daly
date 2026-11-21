@@ -1,8 +1,11 @@
 tokens.json
 .env
-state/
 __pycache__/
 keys.env
 calls-dry.csv
 STOP
 node_modules/
+state/*
+!state/watch.json
+!state/tokens.enc
+!state/scoreboard-*
