@@ -1,0 +1,13 @@
+{
+  "chain": "solana",
+  "min_liquidity_usd": 15000,
+  "min_mcap_usd": 20000,
+  "max_mcap_usd": 300000,
+  "min_age_hours": 1,
+  "max_age_hours": 48,
+  "min_volume_24h_usd": 50000,
+  "max_calls_per_day": 3,
+  "result_milestones": [2, 5, 10, 25, 50, 100],
+  "disclosure": "I don't hold this. Not financial advice, DYOR. Tracking all my calls.",
+  "dry_run": true
+}
