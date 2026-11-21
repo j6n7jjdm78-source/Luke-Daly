@@ -7,17 +7,23 @@ from dataclasses import dataclass
 
 from .transcribe import Segment
 
-PROMPT = """You are an editor picking moments from a YouTube live stream to turn into \
-YouTube Shorts. Below is a timestamped transcript window ([seconds] text).
+PROMPT = """You are a ruthless short-form editor cutting YouTube Shorts from a YouTube \
+live stream. Below is a timestamped transcript window ([seconds] text).
 
-Pick up to {n} self-contained moments of {lo}-{hi} seconds: a strong hook in the first \
-seconds, a clear payoff (funny, surprising, insightful, emotional, or high-energy), and \
-no dependence on earlier context. Start and end on sentence boundaries, using the \
-timestamps shown. Do not overlap clips.
+Pick up to {n} moments, each {lo}-{hi} seconds (ideal: 20-30). Rules:
+- HOOK: the clip must grab attention in its first 2 seconds (a bold claim, question, \
+punchline setup, shout, reaction). Start exactly on that line - cut greetings, filler, \
+throat-clearing and dead air.
+- PAYOFF: end right after the payoff (the joke lands, the reveal, the reaction). Never \
+trail off or run past it. Shorter is better if the payoff arrives sooner.
+- SELF-CONTAINED: a stranger must understand it with zero context.
+- SKIP: intros/outros, "like and subscribe", sponsor reads, chat-reading lulls, rambling.
+- Start/end on sentence boundaries using the timestamps shown. No overlaps.
+- Score honestly 1-10; most moments are not a 7+.
 
 Return ONLY a JSON array, no prose:
-[{{"start": <sec>, "end": <sec>, "score": <1-10>, "title": "<=70 chars, no hashtags", \
-"description": "1-2 sentences"}}]
+[{{"start": <sec>, "end": <sec>, "score": <1-10>, "title": "<=60 chars, curiosity-driven, \
+no hashtags, no clickbait lies", "description": "1-2 sentences"}}]
 Return [] if nothing is good enough.
 
 Transcript:

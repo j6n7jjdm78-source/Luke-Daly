@@ -3,7 +3,7 @@
 YouTube live stream (VOD) → auto-picked highlights → 9:16 captioned clips → YouTube Shorts.
 
 Pipeline: `yt-dlp` download → `faster-whisper` word-level transcript → Claude picks the best
-20–59s moments → `ffmpeg` renders 1080x1920 with burned-in captions → YouTube Data API upload.
+short (12–35s) hook-first moments → `ffmpeg` renders 1080x1920 with burned-in captions → YouTube Data API upload.
 
 ## Setup
 ```bash
@@ -19,7 +19,7 @@ OAuth *Desktop* client, save it as `client_secret.json`. First upload opens a br
 python -m clipbot https://www.youtube.com/watch?v=VIDEO_ID --no-upload   # render only, review in output/
 python -m clipbot https://www.youtube.com/watch?v=VIDEO_ID               # render + upload
 ```
-The stream must have ended (VOD available). Tune everything in `config.yaml`.
+Works on streams that are **live now** (records in 10-min chunks and clips as it goes) or **ended within the last 24h** (older ones are refused). Tune everything in `config.yaml`.
 
 ## Notes
 - Only clip streams you own or have permission to reuse. Re-uploading others' content risks

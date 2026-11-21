@@ -26,3 +26,19 @@ def test_render(tmp_path):
         out = render_clip(src, 0, 3, words, tmp_path / f"{layout}.mp4",
                           {"layout": layout, "captions": True, "font": "Arial", "font_size": 72})
         assert out.stat().st_size > 1000
+
+
+def test_freshness():
+    import time
+    import pytest
+    from clipbot.source import StaleStream, check_fresh
+    now = time.time()
+    live = {"live_status": "is_live"}
+    assert check_fresh(live, 24) == "live"
+    recent = {"live_status": "was_live", "release_timestamp": now - 5 * 3600, "duration": 3600}
+    assert check_fresh(recent, 24) == "vod"
+    old = {"live_status": "was_live", "release_timestamp": now - 40 * 3600, "duration": 3600}
+    with pytest.raises(StaleStream):
+        check_fresh(old, 24)
+    with pytest.raises(StaleStream):
+        check_fresh({"live_status": "not_live"}, 24)
