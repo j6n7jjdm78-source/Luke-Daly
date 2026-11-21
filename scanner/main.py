@@ -18,6 +18,7 @@ def load_env():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="scan once and exit")
+    ap.add_argument("--test", action="store_true", help="send a sample signal to check Telegram")
     ap.add_argument("--tf", default=None)
     ap.add_argument("--source", default=None)
     ap.add_argument("--min-touches", type=int, default=None)
@@ -28,6 +29,12 @@ def main():
     if a.source: s.source = a.source
     if a.min_touches: s.min_touches = a.min_touches
     s.telegram_token, s.telegram_chat = env.get("TELEGRAM_BOT_TOKEN", ""), env.get("TELEGRAM_CHAT_ID", "")
+    if a.test:
+        import pandas as pd
+        from .strategy import Signal
+        notify.send(Signal("TEST-BTC", "BUY", 100000.0, 99000.0, 102000.0, 3,
+                           pd.Timestamp.now(tz="UTC"), ["this is a test message"]), s)
+        return
     src = make_source(s, env)
     print(f"Scanning {[x.name for x in s.symbols]} on {s.timeframe} via {src.name}")
     last = {}  # (symbol) -> (bar time, side)
