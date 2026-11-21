@@ -19,6 +19,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="scan once and exit")
     ap.add_argument("--test", action="store_true", help="send a sample signal to check Telegram")
+    ap.add_argument("--chat-id", action="store_true", help="check the bot token and list chats it can see")
     ap.add_argument("--tf", default=None)
     ap.add_argument("--source", default=None)
     ap.add_argument("--min-touches", type=int, default=None)
@@ -29,6 +30,21 @@ def main():
     if a.source: s.source = a.source
     if a.min_touches: s.min_touches = a.min_touches
     s.telegram_token, s.telegram_chat = env.get("TELEGRAM_BOT_TOKEN", ""), env.get("TELEGRAM_CHAT_ID", "")
+    if a.chat_id:
+        import requests
+        tok = env.get("TELEGRAM_BOT_TOKEN", "").strip()
+        if not tok:
+            return print("TELEGRAM_BOT_TOKEN is empty in .env")
+        me = requests.get(f"https://api.telegram.org/bot{tok}/getMe", timeout=15).json()
+        if not me.get("ok"):
+            return print("Token rejected by Telegram (wrong, revoked, or has extra characters):", me)
+        print("Token OK. Bot:", me["result"]["username"])
+        ups = requests.get(f"https://api.telegram.org/bot{tok}/getUpdates", timeout=15).json()
+        chats = {(u.get("message") or u.get("my_chat_member") or {}).get("chat", {}).get("id"):
+                 (u.get("message") or u.get("my_chat_member") or {}).get("chat", {}).get("title") for u in ups.get("result", [])}
+        chats.pop(None, None)
+        print("Chats seen:", chats or "none yet - add the bot to the group, send a message there, run again")
+        return
     if a.test:
         import pandas as pd
         from .strategy import Signal
