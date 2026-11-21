@@ -64,15 +64,17 @@ def tg_send(text, image=None, tweet_id=None):
     except Exception as e:
         print(f"[TG] could not mirror to Telegram ({type(e).__name__}); X post is unaffected")
 
-def post(text, reply_to=None, media=None, image=None):
+def post(text, reply_to=None, media=None, image=None, mirror=True):
     print(("[DRY RUN] " if DRY else "[POST] ") + text + (f"\n[+ image {media}]" if media else "") + "\n")
-    if DRY: tg_send(text, image, "dry"); return "dry-" + str(int(time.time()))
+    if DRY:
+        if mirror: tg_send(text, image, "dry")
+        return "dry-" + str(int(time.time()))
     body = {"text": text}
     if media: body["media"] = {"media_ids": [media]}
     if reply_to and str(reply_to).isdigit(): body["reply"] = {"in_reply_to_tweet_id": reply_to}
     tid = http("https://api.x.com/2/tweets", json.dumps(body).encode(),
                {"Authorization": "Bearer " + token(), "Content-Type": "application/json"})["data"]["id"]
-    tg_send(text, image, tid)
+    if mirror: tg_send(text, image, tid)
     return tid
 
 def rows():
@@ -124,6 +126,19 @@ def safety(ca):
     if top10 > 55: return False, f"top 10 holders own {top10:.0f}%", ""
     return True, "ok", f"mint+freeze revoked | {cnt} holders | top10 {top10:.0f}%"
 
+CTA = [
+    "Why follow @{h}? Every call is logged with the market cap at the time, and results get posted: wins and losses. Join the community: {link}",
+    "What you get here: calls with a card and the contract, a safety check before each post, and a public record of how they do. Community: {link}",
+    "We track every call-out and post the results, good or bad. Follow for the next one, and join the group to talk through them: {link}",
+    "No hype, just logged calls: market cap at the call, peak results, and the misses too. Follow @{h} and join the community: {link}",
+]
+
+def cta_reply(tid, n):
+    """Self-reply under a top-level post explaining why to follow and join the community. Wording rotates; never mirrored to Telegram."""
+    if not CFG.get("cta_enabled") or not CFG.get("community_link"): return
+    try: post(CTA[n % len(CTA)].format(h=CFG.get("handle", "Cliperzcoins711"), link=CFG["community_link"]), reply_to=tid, mirror=False)
+    except Exception as e: print(f"[WARN] community comment failed ({type(e).__name__}); main post is unaffected")
+
 def publish_call(q, mc, liq, text, tier=""):
     """Makes the card, uploads it, posts, and logs the call. Never posts a call as text only."""
     import subprocess
@@ -142,6 +157,7 @@ def publish_call(q, mc, liq, text, tier=""):
     rs.append(dict(id=n, token=sym, chain=CFG["chain"], contract=ca, called_at_utc=now.isoformat(), mcap_at_call=mc,
                    tweet_id=tid, status="open", current_mcap=mc, multiple=1.0, notes=tier))
     save(rs)
+    cta_reply(tid, n)
 
 def call_out():
     rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date()) and not x["notes"].startswith("EARLY")]
@@ -304,7 +320,8 @@ def scoreboard():
         media = "dry-media" if DRY else upload_image(png)
     except Exception as e:
         print(f"[SKIP] leaderboard picture failed ({e!r}); not posting a text-only leaderboard"); os.remove(mark); return
-    post(f"Top calls this week 🏆\nTop {len(top)} of {len(wk)} calls. Every call is logged.", media=media, image=png)
+    lb = post(f"Top calls this week 🏆\nTop {len(top)} of {len(wk)} calls. Every call is logged.", media=media, image=png)
+    cta_reply(lb, len(wk))
 
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
