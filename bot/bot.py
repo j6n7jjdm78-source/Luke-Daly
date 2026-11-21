@@ -9,7 +9,9 @@ FIELDS = "id,token,chain,contract,called_at_utc,mcap_at_call,tweet_id,status,cur
 DRY = CFG["dry_run"]; now = dt.datetime.now(dt.timezone.utc)
 
 def http(url, data=None, headers=None, method=None):
-    req = r.Request(url, data, headers or {}, method=method)
+    h = {"User-Agent": "Mozilla/5.0 (compatible; cliperz-bot/1.0)", "Accept": "application/json"}
+    h.update(headers or {})
+    req = r.Request(url, data, h, method=method)
     return json.load(r.urlopen(req, timeout=20))
 
 def token():
