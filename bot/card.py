@@ -1,9 +1,10 @@
 """Make a 1200x675 call card. Usage: python3 bot/card.py N SYMBOL "Token Name" MCAP_K LIQ_K BUYS SELLS out.png"""
 import sys, os, subprocess, tempfile
 n, sym, name, mc, liq, b, s, out = sys.argv[1:9]
+tag = os.environ.get("CARD_TAG", "CALL")
 html = f"""<html><body style="margin:0;width:1200px;height:675px;background:radial-gradient(circle at 20% 0%,#16352a,#060a08 70%);font-family:Helvetica,Arial,sans-serif;color:#e9fff1;position:relative;overflow:hidden">
 <div style="position:absolute;inset:24px;border:2px solid rgba(31,209,107,.35);border-radius:28px"></div>
-<div style="position:absolute;left:70px;top:60px;font-size:26px;letter-spacing:8px;color:#1fd16b">CLIPERZ ✂ CALL #{n}</div>
+<div style="position:absolute;left:70px;top:60px;font-size:26px;letter-spacing:8px;color:#1fd16b">CLIPERZ ✂ {tag} #{n}</div>
 <div style="position:absolute;right:70px;top:60px;font-size:26px;color:#7fa090">@Cliperzcoins711</div>
 <div style="position:absolute;left:70px;top:110px;font-size:110px;font-weight:900;background:linear-gradient(90deg,#1fd16b,#c6ff5e);-webkit-background-clip:text;color:transparent;white-space:nowrap">${sym.upper()}</div>
 <div style="position:absolute;left:74px;top:250px;font-size:38px;color:#b9d6c6">{name} · Solana</div>

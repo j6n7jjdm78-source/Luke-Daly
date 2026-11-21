@@ -99,8 +99,27 @@ def safety(ca):
     if top10 > 55: return False, f"top 10 holders own {top10:.0f}%", ""
     return True, "ok", f"mint+freeze revoked | {cnt} holders | top10 {top10:.0f}%"
 
+def publish_call(q, mc, liq, text, tier=""):
+    """Makes the card, uploads it, posts, and logs the call. Never posts a call as text only."""
+    import subprocess
+    rs = rows(); sym = q["baseToken"]["symbol"]; ca = q["baseToken"]["address"]
+    if CFG["paid_promo"]: text += "\nPaid promotion."
+    elif CFG["i_hold_called_coins"]: text += "\nI hold this."
+    n = len(rs) + 1; png = f"{ROOT}/drafts/call{n}.png"; tx = (q.get("txns") or {}).get("h1", {})
+    try:
+        subprocess.run([sys.executable, f"{ROOT}/bot/card.py", str(n), sym, q["baseToken"].get("name", sym), f"{mc/1000:.0f}", f"{liq/1000:.0f}",
+                        str(tx.get("buys", 0)), str(tx.get("sells", 0)), png], check=True, timeout=90,
+                       env={**os.environ, "CARD_TAG": "EARLY CALL" if tier == "EARLY" else "CALL"})
+        media = "dry-media" if DRY else upload_image(png)
+    except Exception as e:
+        print(f"[SKIP] could not make/upload the card ({e!r}); not posting a text-only call"); return
+    tid = post(text, media=media)
+    rs.append(dict(id=n, token=sym, chain=CFG["chain"], contract=ca, called_at_utc=now.isoformat(), mcap_at_call=mc,
+                   tweet_id=tid, status="open", current_mcap=mc, multiple=1.0, notes=tier))
+    save(rs)
+
 def call_out():
-    rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date())]
+    rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date()) and x["notes"] != "EARLY"]
     if len(today) >= CFG["max_calls_per_day"]: return
     best = None; safe = ""
     for c in sorted(candidates(), key=lambda c: -c[0])[:4]:
@@ -109,24 +128,69 @@ def call_out():
         print(f"[SKIP] {c[1]['baseToken']['symbol']}: {why}")
     if not best: return
     _, q, mc, liq, age = best; sym = q["baseToken"]["symbol"]; ca = q["baseToken"]["address"]
-    text = (f"${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age:.0f}h\n"
+    publish_call(q, mc, liq, (f"${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age:.0f}h\n"
             f"Why: buys > sells last hour, 24h vol {fmt(q['volume']['h24'])}, liq/mcap {liq/mc:.0%}\n"
-            f"Safety: {safe}. Still new, can rug.\nCA: {ca}")
-    if CFG["paid_promo"]: text += "\nPaid promotion."
-    elif CFG["i_hold_called_coins"]: text += "\nI hold this."
-    # call card picture: always attach one, never post a call as text only
-    import subprocess
-    n = len(rs) + 1; png = f"{ROOT}/drafts/call{n}.png"; tx = (q.get("txns") or {}).get("h1", {})
-    try:
-        subprocess.run([sys.executable, f"{ROOT}/bot/card.py", str(n), sym, q["baseToken"].get("name", sym), f"{mc/1000:.0f}", f"{liq/1000:.0f}",
-                        str(tx.get("buys", 0)), str(tx.get("sells", 0)), png], check=True, timeout=90)
-        media = "dry-media" if DRY else upload_image(png)
-    except Exception as e:
-        print(f"[SKIP] could not make/upload the card ({e!r}); not posting a text-only call"); return
-    tid = post(text, media=media)
-    rs.append(dict(id=n, token=sym, chain=CFG["chain"], contract=ca, called_at_utc=now.isoformat(), mcap_at_call=mc,
-                   tweet_id=tid, status="open", current_mcap=mc, multiple=1.0, notes=""))
-    save(rs)
+            f"Safety: {safe}. Still new, can rug.\nCA: {ca}"))
+
+# ---------- EARLY tier: 15-60 min old tokens, clearly labelled high risk ----------
+E = dict(min_age_min=15, max_age_min=60, min_mcap=10000, max_mcap=60000, min_liq=8000, buy_ratio=2.0, min_trades=150, max_per_day=2)
+
+def early_safety(ca):
+    """Needs mint+freeze revoked (required). Holder data is often not available yet at this age; if present it must look sane."""
+    info = None
+    for attempt in range(3):
+        try: info = http(f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{ca}/info")["data"]["attributes"]; break
+        except Exception: time.sleep(3 * (attempt + 1))
+    if not info: return False, "no safety data", ""
+    if info.get("mint_authority") != "no": return False, f"mint authority not confirmed revoked ({info.get('mint_authority')})", ""
+    if info.get("freeze_authority") != "no": return False, f"freeze authority not confirmed revoked ({info.get('freeze_authority')})", ""
+    if str(info.get("is_honeypot")).lower() == "yes": return False, "honeypot flag", ""
+    h = info.get("holders") or {}
+    try: cnt = int(h.get("count") or 0); top10 = float((h.get("distribution_percentage") or {}).get("top_10") or 0)
+    except Exception: cnt, top10 = 0, 0
+    if cnt:
+        if cnt < 50: return False, f"only {cnt} holders", ""
+        if top10 > 60: return False, f"top 10 holders own {top10:.0f}%", ""
+        return True, "ok", f"mint+freeze revoked | {cnt} holders | top10 {top10:.0f}%"
+    return True, "ok", "mint+freeze revoked | holder data not available yet"
+
+def early_candidates():
+    seen = {x["contract"] for x in rows()}
+    H = {"User-Agent": "Mozilla/5.0 (compatible; cliperz-bot/1.0)", "Accept": "application/json"}
+    for pg in range(1, 9):  # page back through new pools until we are past the 60 min mark
+        try: d = http(f"https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page={pg}", headers=H)["data"]
+        except Exception: break
+        oldest = 0
+        for p in d:
+            a = p["attributes"]
+            try:
+                age_m = (now - dt.datetime.fromisoformat(a["pool_created_at"].replace("Z", "+00:00"))).total_seconds() / 60
+                ca = p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1]
+            except Exception: continue
+            oldest = max(oldest, age_m)
+            if ca in seen or not (E["min_age_min"] <= age_m <= E["max_age_min"]): continue
+            q = pair(ca)
+            if not q: continue
+            mc, liq = q.get("marketCap") or 0, (q.get("liquidity") or {}).get("usd", 0)
+            tx = (q.get("txns") or {}).get("h1", {}); b, sl = tx.get("buys", 0), tx.get("sells", 0); pc = q.get("priceChange") or {}
+            if (E["min_mcap"] <= mc <= E["max_mcap"] and liq >= E["min_liq"] and b >= E["buy_ratio"] * max(sl, 1)
+                    and b + sl >= E["min_trades"] and pc.get("m5", 0) > 0 and liq / mc > 0.1):
+                yield b / max(sl, 1), q, mc, liq, age_m
+        if oldest > E["max_age_min"]: break
+        time.sleep(2)
+
+def early_call_out():
+    rs = rows()
+    if len([x for x in rs if x["called_at_utc"][:10] == str(now.date()) and x["notes"] == "EARLY"]) >= E["max_per_day"]: return
+    for c in sorted(early_candidates(), key=lambda c: -c[0])[:3]:
+        _, q, mc, liq, age_m = c; ca = q["baseToken"]["address"]; sym = q["baseToken"]["symbol"]
+        ok, why, safe = early_safety(ca)
+        if not ok: print(f"[SKIP early] {sym}: {why}"); continue
+        tx = q["txns"]["h1"]
+        publish_call(q, mc, liq, (f"EARLY / HIGH RISK\n${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age_m:.0f}m\n"
+            f"Why: {tx['buys']} buys vs {tx['sells']} sells, price {q['priceChange'].get('m5', 0):+.0f}% last 5m\n"
+            f"Safety: {safe}. Very new, most of these fail.\nCA: {ca}"), tier="EARLY")
+        return
 
 def track():
     rs = rows()
@@ -145,15 +209,19 @@ def track():
     save(rs)
 
 def scoreboard():
+    """Sunday leaderboard: top 10 calls of the last 7 days that finished above their call price. Footer says how many calls the week had."""
     if now.weekday() != 6 or now.hour < 17: return  # Sundays from 17:00 UTC, once per day
     mark = f"{STATE}/scoreboard-{now.date()}"; os.makedirs(STATE, exist_ok=True)
     if os.path.exists(mark): return
     open(mark, "w").close()
-    week = now - dt.timedelta(days=7)  # nur Calls der letzten 7 Tage
-    m = [float(x["multiple"]) for x in rows() if x["multiple"] and dt.datetime.fromisoformat(x["called_at_utc"]) >= week]
-    if m: post(f"Weekly scoreboard\nCalls: {len(m)} | 2x+: {sum(v >= 2 for v in m)} | Down 50%+: {sum(v <= .5 for v in m)}\n"
-               f"Median: {st.median(m):.2f}x | Best: {max(m):.1f}x | Worst: {min(m):.2f}x")
+    week = now - dt.timedelta(days=7)
+    wk = [x for x in rows() if x["multiple"] and dt.datetime.fromisoformat(x["called_at_utc"]) >= week]
+    top = sorted([x for x in wk if float(x["multiple"]) > 1.0], key=lambda x: -float(x["multiple"]))[:10]
+    if not top: return
+    lines = [f"{i}. ${x['token']} {float(x['multiple']):.1f}x{' 🌱' if x['notes'] == 'EARLY' else ''}" for i, x in enumerate(top, 1)]
+    text = "Top calls this week\n" + "\n".join(lines) + f"\nTop {len(top)} of {len(wk)} calls · 🌱 = early call · NFA"
+    post(text[:280])
 
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
-    track(); call_out(); scoreboard()
+    track(); call_out(); early_call_out(); scoreboard()
