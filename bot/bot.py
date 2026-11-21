@@ -218,9 +218,15 @@ def scoreboard():
     wk = [x for x in rows() if x["multiple"] and dt.datetime.fromisoformat(x["called_at_utc"]) >= week]
     top = sorted([x for x in wk if float(x["multiple"]) > 1.0], key=lambda x: -float(x["multiple"]))[:10]
     if not top: return
-    lines = [f"{i}. ${x['token']} {float(x['multiple']):.1f}x{' 🌱' if x['notes'] == 'EARLY' else ''}" for i, x in enumerate(top, 1)]
-    text = "Top calls this week\n" + "\n".join(lines) + f"\nTop {len(top)} of {len(wk)} calls · 🌱 = early call · NFA"
-    post(text[:280])
+    import subprocess
+    rj = f"{STATE}/lb_rows.json"; png = f"{ROOT}/drafts/leaderboard-{now.date()}.png"
+    json.dump([[x["token"], float(x["multiple"]), x["notes"] == "EARLY"] for x in top], open(rj, "w"))
+    try:
+        subprocess.run([sys.executable, f"{ROOT}/bot/leaderboard.py", rj, str(len(wk)), png], check=True, timeout=90)
+        media = "dry-media" if DRY else upload_image(png)
+    except Exception as e:
+        print(f"[SKIP] leaderboard picture failed ({e!r}); not posting a text-only leaderboard"); os.remove(mark); return
+    post(f"Top calls this week 🏆\nTop {len(top)} of {len(wk)} calls. Every call is logged.", media=media)
 
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
