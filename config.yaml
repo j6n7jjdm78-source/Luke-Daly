@@ -1,0 +1,34 @@
+# clipbot configuration
+download:
+  max_height: 1080          # cap source resolution
+  # Optional: only fetch part of a long stream (HH:MM:SS), e.g. for testing
+  # start: "00:10:00"
+  # end:   "00:40:00"
+
+transcribe:
+  model: small              # tiny/base/small/medium/large-v3
+  device: auto              # auto/cpu/cuda
+  language: null            # null = auto-detect
+
+select:
+  model: claude-sonnet-5-5
+  max_clips: 5              # clips kept per run (best by score)
+  min_seconds: 20
+  max_seconds: 59           # Shorts: keep under 60s
+  window_minutes: 20        # transcript is analysed in windows this long
+  min_score: 6              # 1-10 virality score cutoff
+
+render:
+  layout: blur              # blur = full frame over blurred bg, crop = center crop
+  captions: true
+  font: Arial
+  font_size: 72
+
+upload:
+  enabled: true
+  privacy: private          # private/unlisted/public  (start private and review!)
+  category_id: "20"         # 20 = Gaming, 22 = People&Blogs, 24 = Entertainment
+  tags: []
+  credit_source: true       # add "Source: <url>" to description
+  client_secret: client_secret.json
+  token: token.json
