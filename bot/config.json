@@ -19,5 +19,6 @@
   "i_hold_called_coins": false,
   "paid_promo": false,
   "bio_line": "Tracking every call, wins and losses. Not financial advice. DYOR.",
-  "handle": "Cliperzcoins711"
+  "handle": "Cliperzcoins711",
+  "early_enabled": false
 }

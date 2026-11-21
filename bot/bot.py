@@ -225,6 +225,7 @@ def early_candidates():
                 yield b / max(sl, 1), q, mc, liq, age_m
 
 def early_call_out():
+    if not CFG.get("early_enabled", True): return
     rs = rows()
     if len([x for x in rs if x["called_at_utc"][:10] == str(now.date()) and x["notes"].startswith("EARLY")]) >= E["max_per_day"]: return
     for c in sorted(early_candidates(), key=lambda c: -c[0])[:3]:
