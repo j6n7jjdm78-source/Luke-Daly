@@ -1,3 +1,3 @@
 id,token,chain,contract,called_at_utc,mcap_at_call,tweet_id,status,current_mcap,multiple,notes
-1,JINGYU,solana,DUZrwdjEthcJ99ZiRXr31UuqTohoTg7VjTEyfGdBpump,2026-11-21T13:08:58.000+00:00,93050,2124127933422051639,open,96104.0,1.03,"tweet posted manually; mcap_at_call is the $93k draft snapshot (13:07 UTC), actual mcap at post time not recorded"
-2,Bigfoot,solana,3b7WvfRxRaoMuq4j6JWJzrL5mym3Km3QzfX5dqCopump,2026-11-21T14:52:53.186227+00:00,58506,2124154094101172683,open,71106.0,1.22,
+1,JINGYU,solana,DUZrwdjEthcJ99ZiRXr31UuqTohoTg7VjTEyfGdBpump,2026-11-21T13:08:58.000+00:00,93050,2124127933422051639,open,101191.0,1.09,"tweet posted manually; mcap_at_call is the $93k draft snapshot (13:07 UTC), actual mcap at post time not recorded"
+2,Bigfoot,solana,3b7WvfRxRaoMuq4j6JWJzrL5mym3Km3QzfX5dqCopump,2026-11-21T14:52:53.186227+00:00,58506,2124154094101172683,open,73531.0,1.26,
