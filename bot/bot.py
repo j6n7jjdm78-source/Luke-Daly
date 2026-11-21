@@ -144,7 +144,7 @@ def publish_call(q, mc, liq, text, tier=""):
     save(rs)
 
 def call_out():
-    rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date()) and x["notes"] != "EARLY"]
+    rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date()) and not x["notes"].startswith("EARLY")]
     if len(today) >= CFG["max_calls_per_day"]: return
     best = None; safe = ""
     for c in sorted(candidates(), key=lambda c: -c[0])[:4]:
@@ -226,7 +226,7 @@ def early_candidates():
 
 def early_call_out():
     rs = rows()
-    if len([x for x in rs if x["called_at_utc"][:10] == str(now.date()) and x["notes"] == "EARLY"]) >= E["max_per_day"]: return
+    if len([x for x in rs if x["called_at_utc"][:10] == str(now.date()) and x["notes"].startswith("EARLY")]) >= E["max_per_day"]: return
     for c in sorted(early_candidates(), key=lambda c: -c[0])[:3]:
         _, q, mc, liq, age_m = c; ca = q["baseToken"]["address"]; sym = q["baseToken"]["symbol"]
         ok, why, safe = early_safety(ca)
@@ -269,7 +269,7 @@ def scoreboard():
     if not top: return
     import subprocess
     rj = f"{STATE}/lb_rows.json"; png = f"{ROOT}/drafts/leaderboard-{now.date()}.png"
-    json.dump([[x["token"], float(x["multiple"]), x["notes"] == "EARLY"] for x in top], open(rj, "w"))
+    json.dump([[x["token"], float(x["multiple"]), x["notes"].startswith("EARLY")] for x in top], open(rj, "w"))
     try:
         subprocess.run([sys.executable, f"{ROOT}/bot/leaderboard.py", rj, str(len(wk)), png], check=True, timeout=90)
         media = "dry-media" if DRY else upload_image(png)
