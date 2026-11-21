@@ -4,7 +4,7 @@
   "min_mcap_usd": 20000,
   "max_mcap_usd": 300000,
   "min_age_hours": 1,
-  "max_age_hours": 48,
+  "max_age_hours": 96,
   "min_volume_24h_usd": 50000,
   "max_calls_per_day": 8,
   "result_milestones": [
@@ -27,5 +27,6 @@
   "cta_enabled": false,
   "community_link": "https://t.me/+pMCfTzv95v44YTZh",
   "cta_in_post": true,
-  "cta_text": "Follow for more call-outs. Community: {link}"
+  "cta_text": "Follow for more call-outs. Community: {link}",
+  "max_h1_change_pct": 60
 }

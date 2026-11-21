@@ -109,18 +109,31 @@ def pair(addr):
     ps = [p for p in ps if p["chainId"] == CFG["chain"]]
     return max(ps, key=lambda p: (p.get("liquidity") or {}).get("usd", 0)) if ps else None
 
+def candidate_addresses():
+    """Two sources: DexScreener's newest Solana profiles, and GeckoTerminal's trending Solana pools (where coins with real volume show up)."""
+    out = []
+    try: out += [p["tokenAddress"] for p in http("https://api.dexscreener.com/token-profiles/latest/v1") if p["chainId"] == CFG["chain"]]
+    except Exception: pass
+    for pg in (1, 2):
+        try:
+            for p in gt_get(f"https://api.geckoterminal.com/api/v2/networks/{CFG['chain']}/trending_pools?page={pg}")["data"]:
+                out.append(p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1])
+        except Exception: break
+        time.sleep(2)
+    return list(dict.fromkeys(out))
+
 def candidates():
     seen = {x["contract"] for x in rows()}
-    for p in http("https://api.dexscreener.com/token-profiles/latest/v1"):
-        if p["chainId"] != CFG["chain"] or p["tokenAddress"] in seen: continue
-        q = pair(p["tokenAddress"])
+    for addr in candidate_addresses():
+        if addr in seen: continue
+        q = pair(addr)
         if not q or not q.get("pairCreatedAt"): continue
         age = (now.timestamp() * 1000 - q["pairCreatedAt"]) / 3.6e6
         mc, liq, vol = q.get("marketCap") or 0, (q.get("liquidity") or {}).get("usd", 0), (q.get("volume") or {}).get("h24", 0)
         tx = (q.get("txns") or {}).get("h1", {})
         if (CFG["min_mcap_usd"] <= mc <= CFG["max_mcap_usd"] and liq >= CFG["min_liquidity_usd"] and vol >= CFG["min_volume_24h_usd"]
                 and CFG["min_age_hours"] <= age <= CFG["max_age_hours"] and tx.get("buys", 0) > tx.get("sells", 0) and liq / mc > 0.05
-                and -5 < (q.get("priceChange") or {}).get("h1", 0) <= 40      # not falling, not already pumped
+                and -5 < (q.get("priceChange") or {}).get("h1", 0) <= CFG.get("max_h1_change_pct", 40)   # not falling, not already pumped
                 and (q.get("priceChange") or {}).get("m5", 0) > -5            # not dumping right now
                 and vol <= mc * 15                                           # skip wash-trading volume
                 and tx.get("buys", 0) >= 1.3 * max(tx.get("sells", 0), 1)    # clear buy pressure
