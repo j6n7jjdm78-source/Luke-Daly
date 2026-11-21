@@ -1,0 +1,41 @@
+name: scan-test (dry run, posts nothing)
+# Runs every 5 minutes on GitHub's free runners to TEST the cloud setup: scans for coins, applies every filter and the
+# safety check, and prints what the bot WOULD post. It has no secrets, never posts to X or Telegram, and writes nothing.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: scan-test
+  cancel-in-progress: true
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLIPERZ_DRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Cache browser for the card pictures
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-v1
+      - name: Install card renderer and fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-liberation fonts-dejavu-core fonts-noto-color-emoji
+          npm install --no-save --silent playwright@1.49.1
+          npx playwright install --with-deps chromium
+      - name: Scan report (what passed, what failed and why)
+        run: python3 bot/scan_report.py
+      - name: Full bot cycle in dry-run mode (prints what it would post, posts nothing)
+        run: python3 bot/bot.py
