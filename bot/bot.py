@@ -80,15 +80,38 @@ def candidates():
                 and tx.get("buys", 0) + tx.get("sells", 0) >= 200):          # real activity
             yield vol, q, mc, liq, age
 
+def safety(ca):
+    """Contract safety gate via GeckoTerminal token info. Returns (ok, reason, summary). Fails closed when data is missing."""
+    info = None
+    for attempt in range(3):
+        try:
+            info = http(f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{ca}/info")["data"]["attributes"]; break
+        except Exception as e:
+            time.sleep(3 * (attempt + 1))
+    if not info: return False, "no safety data", ""
+    if info.get("mint_authority") != "no": return False, f"mint authority not revoked ({info.get('mint_authority')})", ""
+    if info.get("freeze_authority") != "no": return False, f"freeze authority not revoked ({info.get('freeze_authority')})", ""
+    if str(info.get("is_honeypot")).lower() == "yes": return False, "honeypot flag", ""
+    h = info.get("holders") or {}
+    try: cnt = int(h.get("count") or 0); top10 = float((h.get("distribution_percentage") or {}).get("top_10") or 100)
+    except Exception: return False, "no holder data", ""
+    if cnt < 100: return False, f"only {cnt} holders", ""
+    if top10 > 55: return False, f"top 10 holders own {top10:.0f}%", ""
+    return True, "ok", f"mint+freeze revoked | {cnt} holders | top10 {top10:.0f}%"
+
 def call_out():
     rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date())]
     if len(today) >= CFG["max_calls_per_day"]: return
-    best = max(candidates(), default=None, key=lambda c: c[0])
+    best = None; safe = ""
+    for c in sorted(candidates(), key=lambda c: -c[0])[:4]:
+        ok, why, summ = safety(c[1]["baseToken"]["address"])
+        if ok: best, safe = c, summ; break
+        print(f"[SKIP] {c[1]['baseToken']['symbol']}: {why}")
     if not best: return
     _, q, mc, liq, age = best; sym = q["baseToken"]["symbol"]; ca = q["baseToken"]["address"]
     text = (f"${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age:.0f}h\n"
             f"Why: buys > sells last hour, 24h vol {fmt(q['volume']['h24'])}, liq/mcap {liq/mc:.0%}\n"
-            f"Risk: new token, can rug. Check mint/freeze authority yourself.\nCA: {ca}")
+            f"Safety: {safe}. Still new, can rug.\nCA: {ca}")
     if CFG["paid_promo"]: text += "\nPaid promotion."
     elif CFG["i_hold_called_coins"]: text += "\nI hold this."
     # call card picture: always attach one, never post a call as text only
