@@ -1,9 +1,11 @@
 name: cliperz-bot
-# Runs the call-out bot once every 5 minutes on GitHub's free runners (public repo = unlimited minutes).
+# Runs the call-out bot on GitHub's free runners (public repo = unlimited minutes).
+# GitHub schedules can't be faster than 5 minutes, so each run stays alive ~28 minutes and runs the bot every 2 minutes inside it;
+# the schedule queues the next run right behind it, so coverage is continuous apart from a ~2 minute setup gap between runs.
 # Kill switch: add an empty file named STOP to the repo root and posting stops.
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 permissions:
   contents: write
@@ -13,7 +15,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 34
     env:
       X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
       X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
@@ -44,19 +46,14 @@ jobs:
           mkdir -p ~/.config/cliperz-bot && chmod 700 ~/.config/cliperz-bot
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:TOKEN_KEY -in state/tokens.enc -out ~/.config/cliperz-bot/tokens.json
           chmod 600 ~/.config/cliperz-bot/tokens.json
-      - name: Run the bot once
-        run: python3 bot/bot.py
+      - name: Run the bot every 2 minutes for ~28 minutes
+        run: |
+          END=$((SECONDS + 1680))
+          while [ $SECONDS -lt $END ]; do
+            git fetch -q origin main 2>/dev/null && git cat-file -e origin/main:STOP 2>/dev/null && touch STOP   # kill switch from the repo
+            python3 bot/bot.py || echo "bot run failed, will retry in 2 minutes"
+            sleep 120
+          done
       - name: Save X login (re-encrypted) and bot state
         if: always()
-        run: |
-          if [ -s ~/.config/cliperz-bot/tokens.json ]; then
-            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:TOKEN_KEY -in ~/.config/cliperz-bot/tokens.json -out state/tokens.enc
-          fi
-          git config user.name "cliperz-bot"
-          git config user.email "cliperz-bot@users.noreply.github.com"
-          git add calls.csv state/tokens.enc state/watch.json state/scoreboard-* 2>/dev/null || true
-          if ! git diff --cached --quiet; then
-            git commit -q -m "bot state"
-            git pull --rebase -q || true
-            git push -q
-          fi
+        run: bash deploy/save_state.sh
