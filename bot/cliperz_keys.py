@@ -23,3 +23,15 @@ def load():
             raise SystemExit(f"{name} fehlt: als Umgebungsvariable setzen oder in {KEYS} eintragen (siehe SETUP.md).")
         out.append(v)
     return tuple(out)
+
+
+def optional(name):
+    """Optional setting (e.g. TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID): environment first, then keys.env. Returns None if not set."""
+    if os.environ.get(name): return os.environ[name]
+    if os.path.exists(KEYS):
+        for line in open(KEYS, encoding="utf-8"):
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                key, v = line.split("=", 1)
+                if key.strip() == name: return v.strip().strip('"').strip("'")
+    return None

@@ -41,14 +41,39 @@ def upload_image(path):
     d = http("https://api.x.com/2/media/upload", body, {"Authorization": "Bearer " + token(), "Content-Type": f"multipart/form-data; boundary={b}"})
     return str(d["data"]["id"])
 
-def post(text, reply_to=None, media=None):
+def tg_send(text, image=None, tweet_id=None):
+    """Mirrors a post to the Telegram channel. Never raises: a Telegram problem must not affect X posting."""
+    try:
+        tok, chat = cliperz_keys.optional("TELEGRAM_BOT_TOKEN"), cliperz_keys.optional("TELEGRAM_CHAT_ID")
+        if not tok or not chat: return
+        link = f"\n\nhttps://x.com/{CFG.get('handle', 'Cliperzcoins711')}/status/{tweet_id}" if str(tweet_id).isdigit() else ""
+        caption = (text + link)[:1000]
+        if DRY: print(f"[TG dry] {caption[:80]!r}"); return
+        base = f"https://api.telegram.org/bot{tok}/"
+        if image and os.path.exists(image):
+            import uuid
+            b = uuid.uuid4().hex
+            def part(n, v, fn=None, ct=None):
+                h = f'--{b}\r\nContent-Disposition: form-data; name="{n}"' + (f'; filename="{fn}"' if fn else "") + "\r\n" + (f"Content-Type: {ct}\r\n" if ct else "") + "\r\n"
+                return h.encode() + (v if isinstance(v, bytes) else v.encode()) + b"\r\n"
+            body = part("chat_id", chat) + part("caption", caption) + part("photo", open(image, "rb").read(), "card.png", "image/png") + f"--{b}--\r\n".encode()
+            http(base + "sendPhoto", body, {"Content-Type": f"multipart/form-data; boundary={b}"})
+        else:
+            http(base + "sendMessage", json.dumps({"chat_id": chat, "text": caption, "disable_web_page_preview": True}).encode(), {"Content-Type": "application/json"})
+        print("[TG] mirrored to Telegram")
+    except Exception as e:
+        print(f"[TG] could not mirror to Telegram ({type(e).__name__}); X post is unaffected")
+
+def post(text, reply_to=None, media=None, image=None):
     print(("[DRY RUN] " if DRY else "[POST] ") + text + (f"\n[+ image {media}]" if media else "") + "\n")
-    if DRY: return "dry-" + str(int(time.time()))
+    if DRY: tg_send(text, image, "dry"); return "dry-" + str(int(time.time()))
     body = {"text": text}
     if media: body["media"] = {"media_ids": [media]}
     if reply_to and str(reply_to).isdigit(): body["reply"] = {"in_reply_to_tweet_id": reply_to}
-    return http("https://api.x.com/2/tweets", json.dumps(body).encode(),
-                {"Authorization": "Bearer " + token(), "Content-Type": "application/json"})["data"]["id"]
+    tid = http("https://api.x.com/2/tweets", json.dumps(body).encode(),
+               {"Authorization": "Bearer " + token(), "Content-Type": "application/json"})["data"]["id"]
+    tg_send(text, image, tid)
+    return tid
 
 def rows():
     if not os.path.exists(CALLS): return []
@@ -113,7 +138,7 @@ def publish_call(q, mc, liq, text, tier=""):
         media = "dry-media" if DRY else upload_image(png)
     except Exception as e:
         print(f"[SKIP] could not make/upload the card ({e!r}); not posting a text-only call"); return
-    tid = post(text, media=media)
+    tid = post(text, media=media, image=png)
     rs.append(dict(id=n, token=sym, chain=CFG["chain"], contract=ca, called_at_utc=now.isoformat(), mcap_at_call=mc,
                    tweet_id=tid, status="open", current_mcap=mc, multiple=1.0, notes=tier))
     save(rs)
@@ -250,7 +275,7 @@ def scoreboard():
         media = "dry-media" if DRY else upload_image(png)
     except Exception as e:
         print(f"[SKIP] leaderboard picture failed ({e!r}); not posting a text-only leaderboard"); os.remove(mark); return
-    post(f"Top calls this week 🏆\nTop {len(top)} of {len(wk)} calls. Every call is logged.", media=media)
+    post(f"Top calls this week 🏆\nTop {len(top)} of {len(wk)} calls. Every call is logged.", media=media, image=png)
 
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
