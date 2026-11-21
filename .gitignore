@@ -5,3 +5,4 @@ __pycache__/
 keys.env
 calls-dry.csv
 STOP
+node_modules/
