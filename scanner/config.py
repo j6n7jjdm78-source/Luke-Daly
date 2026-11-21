@@ -20,12 +20,11 @@ SYMBOLS = [
 
 @dataclass
 class Settings:
-    timeframe: str = "1h"          # entry timeframe: 15m, 30m, 1h, 4h
-    htf: str = "4h"                # higher timeframe trend filter
+    timeframe: str = "15m"         # entry timeframe (trend checked on 15m + 1h)
+    htf: str = "1h"                # higher timeframe: trend + main S/R levels
     poll_seconds: int = 60
-    min_score: int = 3             # signal strength needed (max 5)
-    sl_atr: float = 1.5            # stop distance in ATR
-    tp_atr: float = 3.0            # target distance in ATR (RR = 2)
+    min_touches: int = 3           # pivot touches needed for a level to count as S/R
+    min_rr: float = 1.5            # minimum reward:risk to alert
     cooldown_bars: int = 6         # don't repeat same-direction signal within N bars
     source: str = os.getenv("DATA_SOURCE", "auto")  # auto | mt5 | public
     telegram_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")

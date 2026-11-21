@@ -1,9 +1,12 @@
-"""Trend-pullback/momentum scorer. Score 0-5 per direction; signal when >= min_score.
+"""Trend + support/resistance strategy.
 
-Long score points:  +1 close above EMA200 (trend)   +1 EMA20 > EMA50 (short trend)
-                    +1 higher-TF trend agrees       +1 MACD histogram rising & > 0 / cross up
-                    +1 RSI between 45-65 (momentum, not overbought)
-Short is the mirror image.
+1. Trend: 15m AND 1h must agree (EMA20 vs EMA50, price vs EMA50, EMA50 slope).
+2. Levels: confirmed swing highs/lows on 1h and 15m, clustered into zones (touch count = strength).
+3. Signal on the last closed 15m bar:
+   uptrend   -> price dips into a support zone and rejects it (closes back above, bullish bar)  => BUY
+   downtrend -> price rallies into a resistance zone and rejects it (closes back below)         => SELL
+   SL sits just beyond the zone, TP at the next opposing zone (or 2R if none), min RR enforced.
+Only closed bars and confirmed pivots are used (no look-ahead).
 """
 from dataclasses import dataclass
 import numpy as np
@@ -13,34 +16,64 @@ import pandas as pd
 def ema(s, n): return s.ewm(span=n, adjust=False).mean()
 
 
-def rsi(close, n=14):
-    d = close.diff()
-    up = d.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
-    dn = (-d.clip(upper=0)).ewm(alpha=1 / n, adjust=False).mean()
-    return 100 - 100 / (1 + up / dn.replace(0, np.nan))
-
-
 def atr(df, n=14):
     pc = df["close"].shift()
     tr = pd.concat([df["high"] - df["low"], (df["high"] - pc).abs(), (df["low"] - pc).abs()], axis=1).max(axis=1)
     return tr.ewm(alpha=1 / n, adjust=False).mean()
 
 
-def indicators(df):
-    d = df.copy()
-    d["ema20"], d["ema50"], d["ema200"] = ema(d.close, 20), ema(d.close, 50), ema(d.close, 200)
-    d["rsi"] = rsi(d.close)
-    macd = ema(d.close, 12) - ema(d.close, 26)
-    d["macd_h"] = macd - ema(macd, 9)
-    d["atr"] = atr(d)
-    return d
-
-
-def htf_bias(df_htf):
-    d = indicators(df_htf).iloc[-2]  # last closed HTF bar
-    if d.close > d.ema50 > d.ema200: return 1
-    if d.close < d.ema50 < d.ema200: return -1
+def trend(df):
+    """+1 up, -1 down, 0 none (uses the last bar of df, which must be closed)."""
+    if len(df) < 60:
+        return 0
+    c = df["close"]
+    e20, e50 = ema(c, 20), ema(c, 50)
+    if e20.iloc[-1] > e50.iloc[-1] and c.iloc[-1] > e50.iloc[-1] and e50.iloc[-1] > e50.iloc[-6]:
+        return 1
+    if e20.iloc[-1] < e50.iloc[-1] and c.iloc[-1] < e50.iloc[-1] and e50.iloc[-1] < e50.iloc[-6]:
+        return -1
     return 0
+
+
+def pivots(df, left=5, right=5):
+    """Confirmed swing highs / lows as lists of prices."""
+    h, l = df["high"].values, df["low"].values
+    highs, lows = [], []
+    for i in range(left, len(df) - right):
+        if h[i] == h[i - left:i + right + 1].max(): highs.append(h[i])
+        if l[i] == l[i - left:i + right + 1].min(): lows.append(l[i])
+    return highs, lows
+
+
+@dataclass
+class Zone:
+    lo: float
+    hi: float
+    touches: int
+
+    @property
+    def mid(self): return (self.lo + self.hi) / 2
+
+
+def cluster(prices, tol):
+    zones, cur = [], []
+    for p in sorted(prices):
+        if cur and p - cur[-1] > tol:
+            zones.append(cur); cur = []
+        cur.append(p)
+    if cur: zones.append(cur)
+    return [Zone(min(z), max(z), len(z)) for z in zones]
+
+
+def find_zones(df15, df1h, tol_atr=0.6):
+    """S/R zones from 1h and 15m pivots. 1h pivots count double (more significant)."""
+    tol = tol_atr * atr(df1h).iloc[-1]
+    h1, l1 = pivots(df1h.tail(300), 5, 5)
+    h2, l2 = pivots(df15.tail(400), 5, 5)
+    pts = h1 * 2 + l1 * 2 + h2 + l2
+    zs = cluster(pts, tol)
+    pad = 0.15 * tol
+    return [Zone(z.lo - pad, z.hi + pad, z.touches) for z in zs]
 
 
 @dataclass
@@ -55,37 +88,51 @@ class Signal:
     reasons: list
 
 
-def score_bar(d, i, bias):
-    """Return (long_score, short_score, long_reasons, short_reasons) for bar index i (a closed bar)."""
-    r, p = d.iloc[i], d.iloc[i - 1]
-    L, S, lr, sr = 0, 0, [], []
-
-    def add(cond_long, cond_short, text):
-        nonlocal L, S
-        if cond_long: L += 1; lr.append(text)
-        if cond_short: S += 1; sr.append(text)
-
-    add(r.close > r.ema200, r.close < r.ema200, "price vs EMA200")
-    add(r.ema20 > r.ema50, r.ema20 < r.ema50, "EMA20/50 alignment")
-    add(bias > 0, bias < 0, "higher-TF trend")
-    add(r.macd_h > 0 and r.macd_h > p.macd_h, r.macd_h < 0 and r.macd_h < p.macd_h, "MACD momentum")
-    add(45 <= r.rsi <= 65, 35 <= r.rsi <= 55, f"RSI {r.rsi:.0f}")
-    return L, S, lr, sr
-
-
-def evaluate(name, df, df_htf, min_score=3, sl_atr=1.5, tp_atr=3.0, i=-2):
-    """Evaluate the last *closed* bar. Returns Signal or None."""
-    d = indicators(df)
-    if len(d) < 210:
+def evaluate(name, df15, df1h, min_touches=3, min_rr=1.5, i=-2, ltf_min=15, htf_min=60):
+    """Evaluate bar i of df15 (default: last closed bar; the forming bar is -1)."""
+    n = len(df15) + i + 1 if i < 0 else i + 1
+    d = df15.iloc[:n]
+    if len(d) < 120 or len(df1h) < 80:
         return None
-    i = len(d) + i if i < 0 else i
-    L, S, lr, sr = score_bar(d, i, htf_bias(df_htf))
-    r = d.iloc[i]
-    # require a fresh MACD/EMA20 trigger so we don't alert every bar of a trend
-    fresh_long = d.macd_h.iloc[i] > 0 >= d.macd_h.iloc[i - 1] or d.close.iloc[i] > d.ema20.iloc[i] and d.close.iloc[i - 1] <= d.ema20.iloc[i - 1]
-    fresh_short = d.macd_h.iloc[i] < 0 <= d.macd_h.iloc[i - 1] or d.close.iloc[i] < d.ema20.iloc[i] and d.close.iloc[i - 1] >= d.ema20.iloc[i - 1]
-    if L >= min_score and L > S and fresh_long:
-        return Signal(name, "BUY", r.close, r.close - sl_atr * r.atr, r.close + tp_atr * r.atr, L, d.index[i], lr)
-    if S >= min_score and S > L and fresh_short:
-        return Signal(name, "SELL", r.close, r.close + sl_atr * r.atr, r.close - tp_atr * r.atr, S, d.index[i], sr)
+    close_t = d.index[-1] + pd.Timedelta(minutes=ltf_min)
+    h = df1h[df1h.index + pd.Timedelta(minutes=htf_min) <= close_t]
+    if len(h) < 80:
+        return None
+
+    t15, t1h = trend(d), trend(h)
+    if t15 == 0 or t15 != t1h:
+        return None
+
+    bar = d.iloc[-1]
+    a = atr(d).iloc[-1]
+    zones = find_zones(d, h)
+    rng = max(bar.high - bar.low, 1e-12)
+    why = [f"15m & 1h trend {'UP' if t15 > 0 else 'DOWN'}"]
+
+    if t15 > 0:  # look for support bounce
+        sup = [z for z in zones if z.mid < bar.close and z.touches >= min_touches]
+        if not sup: return None
+        z = max(sup, key=lambda z: z.mid)  # nearest support below
+        lower_wick = (min(bar.open, bar.close) - bar.low) / rng
+        if bar.low <= z.hi and bar.close > z.hi and bar.close > bar.open and lower_wick >= 0.25:
+            sl = z.lo - 0.3 * a
+            risk = bar.close - sl
+            res = [x for x in zones if x.lo > bar.close + risk]
+            tp = min(res, key=lambda x: x.lo).lo if res else bar.close + 2 * risk
+            if risk > 0 and (tp - bar.close) / risk >= min_rr:
+                why += [f"bounce off support {z.lo:,.2f}-{z.hi:,.2f} ({z.touches} touches)", f"RR {(tp - bar.close) / risk:.1f}"]
+                return Signal(name, "BUY", bar.close, sl, tp, min(5, z.touches), d.index[-1], why)
+    else:  # resistance rejection
+        res = [z for z in zones if z.mid > bar.close and z.touches >= min_touches]
+        if not res: return None
+        z = min(res, key=lambda z: z.mid)
+        upper_wick = (bar.high - max(bar.open, bar.close)) / rng
+        if bar.high >= z.lo and bar.close < z.lo and bar.close < bar.open and upper_wick >= 0.25:
+            sl = z.hi + 0.3 * a
+            risk = sl - bar.close
+            sup = [x for x in zones if x.hi < bar.close - risk]
+            tp = max(sup, key=lambda x: x.hi).hi if sup else bar.close - 2 * risk
+            if risk > 0 and (bar.close - tp) / risk >= min_rr:
+                why += [f"rejection at resistance {z.lo:,.2f}-{z.hi:,.2f} ({z.touches} touches)", f"RR {(bar.close - tp) / risk:.1f}"]
+                return Signal(name, "SELL", bar.close, sl, tp, min(5, z.touches), d.index[-1], why)
     return None

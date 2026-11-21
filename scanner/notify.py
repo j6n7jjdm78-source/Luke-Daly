@@ -4,7 +4,7 @@ import requests
 
 def fmt(sig):
     arrow = "🟢" if sig.side == "BUY" else "🔴"
-    return (f"{arrow} {sig.symbol} {sig.side}  (strength {sig.score}/5)\n"
+    return (f"{arrow} {sig.symbol} {sig.side}  (level strength {sig.score})\n"
             f"Entry ≈ {sig.price:,.2f}\nSL: {sig.sl:,.2f}\nTP: {sig.tp:,.2f}\n"
             f"Why: {', '.join(sig.reasons)}\nBar: {sig.time:%Y-%m-%d %H:%M} UTC\n"
             f"Not financial advice - manage your risk.")
