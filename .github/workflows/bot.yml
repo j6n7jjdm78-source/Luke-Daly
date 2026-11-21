@@ -4,8 +4,8 @@ name: cliperz-bot
 # the schedule queues the next run right behind it, so coverage is continuous apart from a ~2 minute setup gap between runs.
 # Kill switch: add an empty file named STOP to the repo root and posting stops.
 on:
-  schedule:
-    - cron: "*/10 * * * *"
+  # The schedule is switched OFF on purpose: the bot currently runs in the cloud session, and two copies would double-post
+  # and break the X login. To switch the GitHub version on later, add back:  schedule: [{cron: "*/10 * * * *"}]
   workflow_dispatch:
 permissions:
   contents: write
