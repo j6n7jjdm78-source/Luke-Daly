@@ -29,10 +29,23 @@ def token():
         json.dump(t, open(TOK, "w"))
     return t["access_token"]
 
-def post(text, reply_to=None):
-    print(("[DRY RUN] " if DRY else "[POST] ") + text + "\n")
+def upload_image(path):
+    """Uploads a PNG to X (needs the media.write scope). Returns the media id string."""
+    import uuid
+    b = uuid.uuid4().hex
+    def part(n, v, fn=None, ct=None):
+        h = f'--{b}\r\nContent-Disposition: form-data; name="{n}"' + (f'; filename="{fn}"' if fn else "") + "\r\n" + (f"Content-Type: {ct}\r\n" if ct else "") + "\r\n"
+        return h.encode() + (v if isinstance(v, bytes) else v.encode()) + b"\r\n"
+    body = (part("media", open(path, "rb").read(), "card.png", "image/png") + part("media_category", "tweet_image")
+            + part("media_type", "image/png") + f"--{b}--\r\n".encode())
+    d = http("https://api.x.com/2/media/upload", body, {"Authorization": "Bearer " + token(), "Content-Type": f"multipart/form-data; boundary={b}"})
+    return str(d["data"]["id"])
+
+def post(text, reply_to=None, media=None):
+    print(("[DRY RUN] " if DRY else "[POST] ") + text + (f"\n[+ image {media}]" if media else "") + "\n")
     if DRY: return "dry-" + str(int(time.time()))
     body = {"text": text}
+    if media: body["media"] = {"media_ids": [media]}
     if reply_to and str(reply_to).isdigit(): body["reply"] = {"in_reply_to_tweet_id": reply_to}
     return http("https://api.x.com/2/tweets", json.dumps(body).encode(),
                 {"Authorization": "Bearer " + token(), "Content-Type": "application/json"})["data"]["id"]
@@ -74,8 +87,17 @@ def call_out():
             f"Risk: new token, can rug. Check mint/freeze authority yourself.\nCA: {ca}")
     if CFG["paid_promo"]: text += "\nPaid promotion."
     elif CFG["i_hold_called_coins"]: text += "\nI hold this."
-    tid = post(text)
-    rs.append(dict(id=len(rs) + 1, token=sym, chain=CFG["chain"], contract=ca, called_at_utc=now.isoformat(), mcap_at_call=mc,
+    # call card picture: always attach one, never post a call as text only
+    import subprocess
+    n = len(rs) + 1; png = f"{ROOT}/drafts/call{n}.png"; tx = (q.get("txns") or {}).get("h1", {})
+    try:
+        subprocess.run([sys.executable, f"{ROOT}/bot/card.py", str(n), sym, q["baseToken"].get("name", sym), f"{mc/1000:.0f}", f"{liq/1000:.0f}",
+                        str(tx.get("buys", 0)), str(tx.get("sells", 0)), png], check=True, timeout=90)
+        media = "dry-media" if DRY else upload_image(png)
+    except Exception as e:
+        print(f"[SKIP] could not make/upload the card ({e!r}); not posting a text-only call"); return
+    tid = post(text, media=media)
+    rs.append(dict(id=n, token=sym, chain=CFG["chain"], contract=ca, called_at_utc=now.isoformat(), mcap_at_call=mc,
                    tweet_id=tid, status="open", current_mcap=mc, multiple=1.0, notes=""))
     save(rs)
 
