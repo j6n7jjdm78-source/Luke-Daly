@@ -46,6 +46,8 @@ def tg_send(text, image=None, tweet_id=None):
     try:
         tok, chat = cliperz_keys.optional("TELEGRAM_BOT_TOKEN"), cliperz_keys.optional("TELEGRAM_CHAT_ID")
         if not tok or not chat: return
+        lk = CFG.get("community_link")
+        if lk: text = "\n".join(l for l in text.split("\n") if lk not in l).rstrip()   # no "join us" line inside the community itself
         link = f"\n\nhttps://x.com/{CFG.get('handle', 'Cliperzcoins711')}/status/{tweet_id}" if str(tweet_id).isdigit() else ""
         caption = (text + link)[:1000]
         if DRY: print(f"[TG dry] {caption[:80]!r}"); return
@@ -159,6 +161,23 @@ def publish_call(q, mc, liq, text, tier=""):
     save(rs)
     cta_reply(tid, n)
 
+def xlen(t):
+    """Length as X counts it: every URL is 23 characters."""
+    import re
+    return len(re.sub(r"https?://\S+", "x" * 23, t))
+
+def call_text(sym, mc, liq, age, q, safe, ca):
+    """Call-out text ending with the follow/join line. Tries the fuller wording first and tightens until it fits in 280."""
+    cta = CFG["cta_text"].format(link=CFG["community_link"]) if CFG.get("cta_in_post") and CFG.get("community_link") else ""
+    why = [f"Why: buys > sells last hour, 24h vol {fmt(q['volume']['h24'])}, liq/mcap {liq/mc:.0%}",
+           f"Why: buys > sells (1h), vol {fmt(q['volume']['h24'])}, liq/mcap {liq/mc:.0%}", "Why: buys > sells (1h)"]
+    safety = [f"Safety: {safe}. Still new, can rug.", f"Safety: {safe.replace(' | ', ', ')}. Can rug."]
+    for w in why:
+        for sf in safety:
+            t = f"${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age:.0f}h\n{w}\n{sf}\nCA: {ca}" + (f"\n{cta}" if cta else "")
+            if xlen(t) <= 274: return t
+    return f"${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)}\nCA: {ca}" + (f"\n{cta}" if cta else "")
+
 def call_out():
     rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date()) and not x["notes"].startswith("EARLY")]
     if len(today) >= CFG["max_calls_per_day"]: return
@@ -169,9 +188,7 @@ def call_out():
         print(f"[SKIP] {c[1]['baseToken']['symbol']}: {why}")
     if not best: return
     _, q, mc, liq, age = best; sym = q["baseToken"]["symbol"]; ca = q["baseToken"]["address"]
-    publish_call(q, mc, liq, (f"${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age:.0f}h\n"
-            f"Why: buys > sells last hour, 24h vol {fmt(q['volume']['h24'])}, liq/mcap {liq/mc:.0%}\n"
-            f"Safety: {safe}. Still new, can rug.\nCA: {ca}"))
+    publish_call(q, mc, liq, call_text(sym, mc, liq, age, q, safe, ca))
 
 # ---------- EARLY tier: 15-60 min old tokens, clearly labelled high risk ----------
 E = dict(min_age_min=15, max_age_min=60, min_mcap=10000, max_mcap=60000, min_liq=8000, buy_ratio=2.0, min_trades=150, max_per_day=2)

@@ -25,5 +25,7 @@
   "handle": "Cliperzcoins711",
   "early_enabled": false,
   "cta_enabled": false,
-  "community_link": "https://t.me/+pMCfTzv95v44YTZh"
+  "community_link": "https://t.me/+pMCfTzv95v44YTZh",
+  "cta_in_post": true,
+  "cta_text": "Follow for more call-outs. Community: {link}"
 }
