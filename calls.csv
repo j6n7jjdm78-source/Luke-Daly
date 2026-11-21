@@ -1,7 +1,7 @@
 id,token,chain,contract,called_at_utc,mcap_at_call,tweet_id,status,current_mcap,multiple,notes,peak_mcap
-1,JINGYU,solana,DUZrwdjEthcJ99ZiRXr31UuqTohoTg7VjTEyfGdBpump,2026-11-21T13:08:58.000+00:00,93050,2124127933422051639,open,109071.0,1.17,"tweet posted manually; mcap_at_call is the $93k draft snapshot (13:07 UTC), actual mcap at post time not recorded",137601
-2,Bigfoot,solana,3b7WvfRxRaoMuq4j6JWJzrL5mym3Km3QzfX5dqCopump,2026-11-21T14:52:53.186227+00:00,58506,2124154094101172683,hit4x,145098.0,2.48,,254006
+1,JINGYU,solana,DUZrwdjEthcJ99ZiRXr31UuqTohoTg7VjTEyfGdBpump,2026-11-21T13:08:58.000+00:00,93050,2124127933422051639,open,113831.0,1.22,"tweet posted manually; mcap_at_call is the $93k draft snapshot (13:07 UTC), actual mcap at post time not recorded",137601
+2,Bigfoot,solana,3b7WvfRxRaoMuq4j6JWJzrL5mym3Km3QzfX5dqCopump,2026-11-21T14:52:53.186227+00:00,58506,2124154094101172683,hit4x,123572.0,2.11,,254006
 3,NEX Ai,solana,ZgiGpWoHDDGNYit9P1SWCbi2acTrFW6jR6edKdJfXKA,2026-11-21T15:33:11.390014+00:00,38408,2124164320103707090,rugged,0,0.0,EARLY | liquidity pulled (rug). Pool reserves ~0.,
 4,ANT,solana,124kimT1h3HdDVmCNiopFQQ13Br3xg7vH9kUgw5drhHZ,2026-11-21T15:38:33.952133+00:00,46195,2124165672397582550,rugged,0,0.0,EARLY | liquidity pulled ~15:48 UTC (rug). Bot wrongly posted a 115847x result reply (tweet 2124168203114876959) from bad data; bug fixed.,
 5,Dandelion,solana,8iw4hrS1RCJb9NLFbexZCApoFeXxhZZWenenemrMJRtr,2026-11-21T15:59:01.577775+00:00,43810,2124170824173138131,rugged,0,0.0,EARLY | liquidity pulled ~16:2x UTC (rug). Pool reserves ~0.,
-6,PATRICK,solana,8mnJZnxaNLqVwkaWWGH7dKmoEzyYzGJx5pHaCp7spump,2026-11-21T20:09:58.543718+00:00,79953,2124233994522771860,open,77805.0,0.97,,
+6,PATRICK,solana,8mnJZnxaNLqVwkaWWGH7dKmoEzyYzGJx5pHaCp7spump,2026-11-21T20:09:58.543718+00:00,79953,2124233994522771860,open,74702.0,0.93,,83736
