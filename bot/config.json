@@ -6,7 +6,7 @@
   "min_age_hours": 1,
   "max_age_hours": 48,
   "min_volume_24h_usd": 50000,
-  "max_calls_per_day": 3,
+  "max_calls_per_day": 8,
   "result_milestones": [
     2,
     5,

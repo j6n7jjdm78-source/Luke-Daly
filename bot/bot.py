@@ -73,7 +73,11 @@ def candidates():
         tx = (q.get("txns") or {}).get("h1", {})
         if (CFG["min_mcap_usd"] <= mc <= CFG["max_mcap_usd"] and liq >= CFG["min_liquidity_usd"] and vol >= CFG["min_volume_24h_usd"]
                 and CFG["min_age_hours"] <= age <= CFG["max_age_hours"] and tx.get("buys", 0) > tx.get("sells", 0) and liq / mc > 0.05
-                and (q.get("priceChange") or {}).get("h1", 0) > -10 and vol <= mc * 15):
+                and -5 < (q.get("priceChange") or {}).get("h1", 0) <= 40      # not falling, not already pumped
+                and (q.get("priceChange") or {}).get("m5", 0) > -5            # not dumping right now
+                and vol <= mc * 15                                           # skip wash-trading volume
+                and tx.get("buys", 0) >= 1.3 * max(tx.get("sells", 0), 1)    # clear buy pressure
+                and tx.get("buys", 0) + tx.get("sells", 0) >= 200):          # real activity
             yield vol, q, mc, liq, age
 
 def call_out():
