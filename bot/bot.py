@@ -41,6 +41,24 @@ def upload_image(path):
     d = http("https://api.x.com/2/media/upload", body, {"Authorization": "Bearer " + token(), "Content-Type": f"multipart/form-data; boundary={b}"})
     return str(d["data"]["id"])
 
+def owner_msg(text):
+    """Private Telegram message to the account owner (reports and alerts). Needs the owner to press Start on the bot once.
+    Never raises, never posts anything public."""
+    try:
+        tok = cliperz_keys.optional("TELEGRAM_BOT_TOKEN")
+        if not tok or DRY: return
+        base = f"https://api.telegram.org/bot{tok}/"
+        oid = cliperz_keys.optional("TELEGRAM_OWNER_CHAT_ID")
+        if not oid:   # find the private chat of whoever pressed Start, and remember it
+            for u in http(base + "getUpdates")["result"]:
+                m = u.get("message") or {}
+                if (m.get("chat") or {}).get("type") == "private": oid = str(m["chat"]["id"])
+            if not oid: return
+            open(cliperz_keys.KEYS, "a").write(f"\nTELEGRAM_OWNER_CHAT_ID={oid}\n")
+        http(base + "sendMessage", json.dumps({"chat_id": oid, "text": text[:3900], "disable_web_page_preview": True}).encode(), {"Content-Type": "application/json"})
+    except Exception:
+        pass
+
 def tg_send(text, image=None, tweet_id=None):
     """Mirrors a post to the Telegram channel. Never raises: a Telegram problem must not affect X posting."""
     try:
@@ -154,11 +172,12 @@ def publish_call(q, mc, liq, text, tier=""):
                        env={**os.environ, "CARD_TAG": "EARLY CALL" if tier == "EARLY" else "CALL"})
         media = "dry-media" if DRY else upload_image(png)
     except Exception as e:
-        print(f"[SKIP] could not make/upload the card ({e!r}); not posting a text-only call"); return
+        print(f"[SKIP] could not make/upload the card ({e!r}); not posting a text-only call"); owner_msg(f"⚠️ Could not make/upload the card for ${sym}; call NOT posted. Will retry next cycle."); return
     tid = post(text, media=media, image=png)
     rs.append(dict(id=n, token=sym, chain=CFG["chain"], contract=ca, called_at_utc=now.isoformat(), mcap_at_call=mc,
                    tweet_id=tid, status="open", current_mcap=mc, multiple=1.0, notes=tier))
     save(rs)
+    owner_msg(f"🚀 NEW CALL #{n} ${sym}{' (EARLY)' if tier else ''} at {fmt(mc)}\nhttps://x.com/{CFG.get('handle', 'Cliperzcoins711')}/status/{tid}")
     cta_reply(tid, n)
 
 def xlen(t):
@@ -292,6 +311,7 @@ def track():
         q = pair(x["contract"]); mc = float((q or {}).get("marketCap") or 0)
         liq_now = float(((q or {}).get("liquidity") or {}).get("usd") or 0); m5 = float(((q or {}).get("priceChange") or {}).get("m5") or 0)
         if not q or liq_now < 1000 or m5 <= -80:      # liquidity pulled / price collapsed: it is a rug, never a "result"
+            if x["status"] != "rugged": owner_msg(f"⚠️ ${x['token']} RUGGED: liquidity pulled or price collapsed. Logged as a loss.")
             x["status"] = "rugged"; x["current_mcap"] = 0; x["multiple"] = 0.0; continue
         x["current_mcap"] = mc; x["multiple"] = round(mc / float(x["mcap_at_call"]), 2)
         if liq_now < 5000 or x["multiple"] > 1000: continue   # untrustworthy numbers: no milestone posts
@@ -314,6 +334,7 @@ def track():
             except Exception as e:
                 print(f"[WARN] result card failed ({e!r}); posting the result as text"); png = None
             post(text, reply_to=x["tweet_id"], media=media, image=png); x["status"] = f"hit{hit[-1]}x"
+            owner_msg(f"🚀 MILESTONE {text}")
         elif mc < float(x["mcap_at_call"]) * 0.1 or not q: x["status"] = "dead"
         age = (now - dt.datetime.fromisoformat(x["called_at_utc"])).days
         if age >= 14 and (x["status"] == "open" or x["status"].startswith("hit")): x["status"] = "closed"
