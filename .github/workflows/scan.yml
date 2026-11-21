@@ -26,8 +26,8 @@ jobs:
           restore-keys: state-
       - name: Run
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.PIPS_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.PIPS_CHAT_ID }}
           DATA_SOURCE: public
         run: |
           case "${{ github.event.inputs.mode || 'scan' }}" in
