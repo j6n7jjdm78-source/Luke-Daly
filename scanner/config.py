@@ -8,13 +8,14 @@ class Symbol:
     name: str          # label used in alerts
     mt5: str           # symbol name in your MetaTrader terminal (brokers differ: XAUUSD, XAUUSDm, BTCUSD...)
     binance: str = ""  # fallback feed (BTC/ETH)
+    kraken: str = ""   # public feed (BTC/ETH), works from cloud servers
     yahoo: str = ""    # fallback feed (gold futures)
 
 
 SYMBOLS = [
     Symbol("GOLD", mt5="XAUUSD", yahoo="GC=F"),
-    Symbol("BTC", mt5="BTCUSD", binance="BTCUSDT"),
-    Symbol("ETH", mt5="ETHUSD", binance="ETHUSDT"),
+    Symbol("BTC", mt5="BTCUSD", binance="BTCUSDT", kraken="XBTUSD"),
+    Symbol("ETH", mt5="ETHUSD", binance="ETHUSDT", kraken="ETHUSD"),
 ]
 
 

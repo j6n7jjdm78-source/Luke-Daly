@@ -38,14 +38,31 @@ class MT5Source:
 
 class PublicSource:
     """Works anywhere (Linux/Mac): Binance for BTC/ETH, Yahoo for gold futures."""
-    name = "public (Binance/Yahoo)"
+    name = "public (Kraken/Binance/Yahoo)"
 
     def candles(self, sym, tf, n=400):
+        if sym.kraken:
+            try:
+                return self._kraken(sym.kraken, tf, n)
+            except Exception as e:
+                print(f"[info] kraken failed for {sym.name} ({e}); trying binance")
         if sym.binance:
             return self._binance(sym.binance, tf, n)
         if sym.yahoo:
             return self._yahoo(sym.yahoo, tf, n)
         raise RuntimeError(f"No public feed for {sym.name}")
+
+    def _kraken(self, pair, tf, n):
+        r = requests.get("https://api.kraken.com/0/public/OHLC",
+                         params={"pair": pair, "interval": TF_MINUTES[tf]}, timeout=15)
+        r.raise_for_status()
+        j = r.json()
+        if j.get("error"):
+            raise RuntimeError(j["error"])
+        rows = next(v for k, v in j["result"].items() if k != "last")
+        df = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "vwap", "volume", "count"])
+        df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+        return df.set_index("time")[COLS].astype(float).tail(n)
 
     def _binance(self, pair, tf, n):
         r = requests.get("https://api.binance.com/api/v3/klines",

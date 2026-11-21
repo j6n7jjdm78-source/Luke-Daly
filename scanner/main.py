@@ -1,5 +1,6 @@
 """Run: python -m scanner.main [--once] [--tf 1h] [--source public|mt5]"""
-import argparse, os, time
+import argparse, json, os, time
+import pandas as pd
 from .config import Settings
 from .data import make_source, TF_MINUTES
 from .strategy import evaluate
@@ -56,7 +57,11 @@ def main():
         return
     src = make_source(s, env)
     print(f"Scanning {[x.name for x in s.symbols]} on {s.timeframe} via {src.name}")
-    last = {}  # (symbol) -> (bar time, side)
+    STATE = "state.json"
+    try:
+        last = {k: (pd.Timestamp(v[0]), v[1]) for k, v in json.load(open(STATE)).items()}
+    except Exception:
+        last = {}  # symbol -> (bar time, side)
     while True:
         for sym in s.symbols:
             try:
@@ -68,12 +73,16 @@ def main():
             if not sig:
                 print(f"{sym.name}: no signal")
                 continue
+            if a.once and (pd.Timestamp.now(tz="UTC") - sig.time).total_seconds() > (TF_MINUTES[s.timeframe] + 45) * 60:
+                print(f"{sym.name}: signal is stale, skipping")
+                continue
             prev = last.get(sym.name)
             bar = TF_MINUTES[s.timeframe] * 60
             if prev and prev[1] == sig.side and (sig.time - prev[0]).total_seconds() < bar * s.cooldown_bars:
                 continue
             last[sym.name] = (sig.time, sig.side)
             notify.send(sig, s)
+            json.dump({k: [str(v[0]), v[1]] for k, v in last.items()}, open(STATE, "w"))
         if a.once:
             break
         time.sleep(s.poll_seconds)
