@@ -40,8 +40,11 @@ def main():
             return print("Token rejected by Telegram (wrong, revoked, or has extra characters):", me)
         print("Token OK. Bot:", me["result"]["username"])
         ups = requests.get(f"https://api.telegram.org/bot{tok}/getUpdates", timeout=15).json()
-        chats = {(u.get("message") or u.get("my_chat_member") or {}).get("chat", {}).get("id"):
-                 (u.get("message") or u.get("my_chat_member") or {}).get("chat", {}).get("title") for u in ups.get("result", [])}
+        chats = {}
+        for u in ups.get("result", []):
+            c = (u.get("message") or u.get("channel_post") or u.get("my_chat_member") or {}).get("chat", {})
+            if c.get("id"):
+                chats[c["id"]] = c.get("title")
         chats.pop(None, None)
         print("Chats seen:", chats or "none yet - add the bot to the group, send a message there, run again")
         return
