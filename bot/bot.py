@@ -86,7 +86,10 @@ def track():
     save(rs)
 
 def scoreboard():
-    if now.weekday() != 6 or now.hour != 17: return  # Sundays ~17:00 UTC
+    if now.weekday() != 6 or now.hour < 17: return  # Sundays from 17:00 UTC, once per day
+    mark = f"{ROOT}/state/scoreboard-{now.date()}"; os.makedirs(f"{ROOT}/state", exist_ok=True)
+    if os.path.exists(mark): return
+    open(mark, "w").close()
     m = [float(x["multiple"]) for x in rows() if x["multiple"]]
     if m: post(f"Weekly scoreboard\nCalls: {len(m)} | 2x+: {sum(v >= 2 for v in m)} | Down 50%+: {sum(v <= .5 for v in m)}\n"
                f"Median: {st.median(m):.2f}x | Best: {max(m):.1f}x | Worst: {min(m):.2f}x")
