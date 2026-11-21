@@ -1,5 +1,11 @@
+tokens.json
 .env
 __pycache__/
-*.pyc
-signals.csv
-state.json
+keys.env
+calls-dry.csv
+STOP
+node_modules/
+state/*
+!state/watch.json
+!state/tokens.enc
+!state/scoreboard-*

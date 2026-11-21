@@ -1,0 +1,62 @@
+name: cliperz-bot
+# Runs the call-out bot on GitHub's free runners (public repo = unlimited minutes).
+# GitHub schedules can't be faster than 5 minutes, so each run stays alive ~28 minutes and runs the bot every 2 minutes inside it;
+# the schedule queues the next run right behind it, so coverage is continuous apart from a ~2 minute setup gap between runs.
+# Kill switch: add an empty file named STOP to the repo root and posting stops.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: cliperz-bot
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 34
+    env:
+      X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
+      X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TOKEN_KEY: ${{ secrets.TOKEN_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Cache browser for the card pictures
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-v1
+      - name: Install card renderer and fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-liberation fonts-dejavu-core fonts-noto-color-emoji
+          npm install --no-save --silent playwright@1.49.1
+          npx playwright install --with-deps chromium
+      - name: Restore X login (encrypted in the repo)
+        run: |
+          mkdir -p ~/.config/cliperz-bot && chmod 700 ~/.config/cliperz-bot
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:TOKEN_KEY -in state/tokens.enc -out ~/.config/cliperz-bot/tokens.json
+          chmod 600 ~/.config/cliperz-bot/tokens.json
+      - name: Run the bot every 2 minutes for ~28 minutes
+        run: |
+          END=$((SECONDS + 1680))
+          while [ $SECONDS -lt $END ]; do
+            git fetch -q origin main 2>/dev/null && git cat-file -e origin/main:STOP 2>/dev/null && touch STOP   # kill switch from the repo
+            BEFORE="$(wc -l < calls.csv) $(md5sum ~/.config/cliperz-bot/tokens.json | cut -d' ' -f1) $(grep -c 'hit' calls.csv)"
+            python3 bot/bot.py || echo "bot run failed, will retry in 2 minutes"
+            AFTER="$(wc -l < calls.csv) $(md5sum ~/.config/cliperz-bot/tokens.json | cut -d' ' -f1) $(grep -c 'hit' calls.csv)"
+            [ "$BEFORE" != "$AFTER" ] && bash deploy/save_state.sh   # new call, milestone, or refreshed login: save right away
+            sleep 120
+          done
+      - name: Save X login (re-encrypted) and bot state
+        if: always()
+        run: bash deploy/save_state.sh

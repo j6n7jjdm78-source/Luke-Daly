@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="80%"><stop offset="0" stop-color="#1d2f4a"/><stop offset="1" stop-color="#070a12"/></radialGradient>
+    <radialGradient id="shell" cx="40%" cy="30%" r="80%"><stop offset="0" stop-color="#ff9a5a"/><stop offset="1" stop-color="#e5431f"/></radialGradient>
+    <pattern id="pole" width="60" height="60" patternUnits="userSpaceOnUse" patternTransform="rotate(-35)">
+      <rect width="60" height="20" fill="#e63946"/><rect y="20" width="60" height="20" fill="#f1f5f9"/><rect y="40" width="60" height="20" fill="#2f6fed"/></pattern>
+    <clipPath id="body"><ellipse cx="400" cy="480" rx="205" ry="165"/></clipPath>
+    <linearGradient id="g" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#1fd16b"/><stop offset="1" stop-color="#c6ff5e"/></linearGradient>
+  </defs>
+  <rect width="800" height="800" fill="url(#bg)"/>
+  <!-- barber pole -->
+  <rect x="48" y="330" width="86" height="380" rx="14" fill="url(#pole)" stroke="#dfe7f2" stroke-width="6"/>
+  <rect x="40" y="316" width="102" height="26" rx="10" fill="#c9d3e0"/><rect x="40" y="700" width="102" height="26" rx="10" fill="#c9d3e0"/>
+  <!-- candles -->
+  <rect x="640" y="520" width="44" height="170" rx="8" fill="#1fd16b"/><rect x="700" y="400" width="44" height="290" rx="8" fill="url(#g)"/>
+  <!-- legs -->
+  <g stroke="#c93412" stroke-width="22" stroke-linecap="round" fill="none">
+    <path d="M250 520 L180 565 L165 625"/><path d="M272 565 L215 628 L208 688"/><path d="M335 598 L305 668 L310 718"/>
+    <path d="M550 520 L620 565 L635 625"/><path d="M528 565 L585 628 L592 688"/><path d="M465 598 L495 668 L490 718"/>
+  </g>
+  <!-- left arm + pincer (open, holding comb) -->
+  <path d="M250 440 Q150 430 165 335" stroke="#e5431f" stroke-width="38" stroke-linecap="round" fill="none"/>
+  <g fill="url(#shell)" stroke="#a82a0e" stroke-width="6">
+    <ellipse cx="150" cy="295" rx="28" ry="80" transform="rotate(-48 150 295)"/><ellipse cx="185" cy="290" rx="28" ry="72" transform="rotate(12 185 290)"/>
+  </g>
+  <!-- comb -->
+  <g transform="rotate(-20 190 250)"><rect x="140" y="232" width="110" height="26" rx="6" fill="#2a2f3a" stroke="#000" stroke-width="3"/>
+    <g stroke="#2a2f3a" stroke-width="6"><path d="M150 258v22M166 258v22M182 258v22M198 258v22M214 258v22M230 258v22M244 258v22"/></g></g>
+  <!-- body -->
+  <ellipse cx="400" cy="480" rx="205" ry="165" fill="url(#shell)" stroke="#a82a0e" stroke-width="8"/>
+  <!-- barber cape bib -->
+  <g clip-path="url(#body)">
+    <rect x="190" y="585" width="420" height="80" fill="#f1f5f9"/>
+    <rect x="190" y="585" width="420" height="16" fill="#e63946"/><rect x="190" y="601" width="420" height="10" fill="#2f6fed"/>
+  </g>
+  <ellipse cx="400" cy="480" rx="205" ry="165" fill="none" stroke="#a82a0e" stroke-width="8"/>
+  <ellipse cx="345" cy="410" rx="64" ry="34" fill="#fff" opacity=".18" transform="rotate(-20 345 410)"/>
+  <!-- pompadour -->
+  <path d="M255 345 Q250 255 340 245 Q420 205 505 250 Q560 270 545 345 Q520 300 470 300 Q400 285 330 305 Q285 315 255 345Z" fill="#14151a" stroke="#000" stroke-width="5"/>
+  <path d="M300 285 Q350 255 420 262" stroke="#4b4f5c" stroke-width="8" fill="none" stroke-linecap="round" opacity=".7"/>
+  <!-- sunglasses -->
+  <g fill="#0a0a0a" stroke="#000" stroke-width="4"><rect x="262" y="410" width="116" height="74" rx="22"/><rect x="422" y="410" width="116" height="74" rx="22"/></g>
+  <rect x="372" y="428" width="56" height="12" fill="#0a0a0a"/>
+  <path d="M278 428 L320 428M438 428 L480 428" stroke="#fff" stroke-opacity=".45" stroke-width="8" stroke-linecap="round"/>
+  <path d="M340 540 Q400 598 470 535" fill="none" stroke="#5a1406" stroke-width="12" stroke-linecap="round"/>
+  <!-- right arm + pincer holding clippers -->
+  <path d="M550 440 Q650 430 635 335" stroke="#e5431f" stroke-width="38" stroke-linecap="round" fill="none"/>
+  <g fill="url(#shell)" stroke="#a82a0e" stroke-width="6">
+    <ellipse cx="650" cy="295" rx="28" ry="80" transform="rotate(48 650 295)"/><ellipse cx="615" cy="290" rx="28" ry="72" transform="rotate(-12 615 290)"/>
+  </g>
+  <g transform="rotate(-25 640 190)">
+    <rect x="585" y="165" width="130" height="56" rx="14" fill="#c4cad3" stroke="#555d69" stroke-width="5"/>
+    <rect x="585" y="140" width="130" height="30" rx="4" fill="#eef2f6" stroke="#555d69" stroke-width="4"/>
+    <g fill="#8a93a0"><rect x="592" y="132" width="8" height="12"/><rect x="608" y="132" width="8" height="12"/><rect x="624" y="132" width="8" height="12"/><rect x="640" y="132" width="8" height="12"/><rect x="656" y="132" width="8" height="12"/><rect x="672" y="132" width="8" height="12"/><rect x="688" y="132" width="8" height="12"/><rect x="704" y="132" width="8" height="12"/></g>
+    <circle cx="650" cy="193" r="10" fill="#1fd16b"/>
+  </g>
+  <!-- buzz marks -->
+  <g stroke="#c6ff5e" stroke-width="7" stroke-linecap="round"><path d="M690 120l22-26M722 140l30-18M660 100l8-32"/></g>
+</svg>

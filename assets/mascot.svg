@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="80%"><stop offset="0" stop-color="#1b3a2a"/><stop offset="1" stop-color="#060b08"/></radialGradient>
+    <radialGradient id="shell" cx="40%" cy="30%" r="80%"><stop offset="0" stop-color="#ff9a5a"/><stop offset="1" stop-color="#e5431f"/></radialGradient>
+    <linearGradient id="g" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#1fd16b"/><stop offset="1" stop-color="#c6ff5e"/></linearGradient>
+  </defs>
+  <rect width="800" height="800" fill="url(#bg)"/>
+  <!-- chart candles behind -->
+  <g opacity=".9">
+    <rect x="95" y="560" width="46" height="120" rx="8" fill="#1fd16b"/><rect x="215" y="500" width="46" height="180" rx="8" fill="#1fd16b"/>
+    <rect x="540" y="470" width="46" height="210" rx="8" fill="#1fd16b"/><rect x="660" y="380" width="46" height="300" rx="8" fill="url(#g)"/>
+  </g>
+  <!-- legs -->
+  <g stroke="#c93412" stroke-width="22" stroke-linecap="round" fill="none">
+    <path d="M250 520 L170 560 L150 620"/><path d="M270 565 L205 625 L195 685"/><path d="M335 595 L300 665 L305 715"/>
+    <path d="M550 520 L630 560 L650 620"/><path d="M530 565 L595 625 L605 685"/><path d="M465 595 L500 665 L495 715"/>
+  </g>
+  <!-- arms -->
+  <g stroke="#e5431f" stroke-width="38" stroke-linecap="round" fill="none">
+    <path d="M250 440 Q150 430 165 330"/><path d="M550 440 Q650 430 635 330"/>
+  </g>
+  <!-- claws (open pincers) -->
+  <g fill="url(#shell)" stroke="#a82a0e" stroke-width="6">
+    <ellipse cx="150" cy="290" rx="28" ry="80" transform="rotate(-48 150 290)"/>
+    <ellipse cx="185" cy="285" rx="28" ry="72" transform="rotate(12 185 285)"/>
+    <ellipse cx="650" cy="290" rx="28" ry="80" transform="rotate(48 650 290)"/>
+    <ellipse cx="615" cy="285" rx="28" ry="72" transform="rotate(-12 615 285)"/>
+  </g>
+  <!-- body -->
+  <ellipse cx="400" cy="480" rx="205" ry="165" fill="url(#shell)" stroke="#a82a0e" stroke-width="8"/>
+  <ellipse cx="345" cy="410" rx="70" ry="38" fill="#fff" opacity=".18" transform="rotate(-20 345 410)"/>
+  <!-- sunglasses -->
+  <g fill="#0a0a0a" stroke="#000" stroke-width="4">
+    <rect x="262" y="418" width="116" height="74" rx="22"/><rect x="422" y="418" width="116" height="74" rx="22"/>
+  </g>
+  <rect x="372" y="436" width="56" height="12" fill="#0a0a0a"/>
+  <path d="M278 436 L320 436" stroke="#fff" stroke-opacity=".45" stroke-width="8" stroke-linecap="round"/>
+  <path d="M438 436 L480 436" stroke="#fff" stroke-opacity=".45" stroke-width="8" stroke-linecap="round"/>
+  <!-- smirk -->
+  <path d="M340 545 Q400 600 470 540" fill="none" stroke="#5a1406" stroke-width="12" stroke-linecap="round"/>
+  <!-- little up-arrow badge -->
+  <circle cx="400" cy="660" r="0" fill="none"/>
+  <text x="400" y="770" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="60" text-anchor="middle" fill="#e9fff1" letter-spacing="8">CLIPERZ</text>
+</svg>

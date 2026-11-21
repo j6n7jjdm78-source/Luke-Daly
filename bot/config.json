@@ -1,0 +1,32 @@
+{
+  "chain": "solana",
+  "min_liquidity_usd": 15000,
+  "min_mcap_usd": 20000,
+  "max_mcap_usd": 300000,
+  "min_age_hours": 1,
+  "max_age_hours": 96,
+  "min_volume_24h_usd": 50000,
+  "max_calls_per_day": 8,
+  "result_milestones": [
+    2,
+    4,
+    6,
+    10,
+    15,
+    20,
+    30,
+    50,
+    100
+  ],
+  "dry_run": false,
+  "i_hold_called_coins": false,
+  "paid_promo": false,
+  "bio_line": "Tracking every call, wins and losses. Not financial advice. DYOR.",
+  "handle": "Cliperzcoins711",
+  "early_enabled": false,
+  "cta_enabled": false,
+  "community_link": "https://t.me/+pMCfTzv95v44YTZh",
+  "cta_in_post": true,
+  "cta_text": "Follow for more call-outs. Community: {link}",
+  "max_h1_change_pct": 60
+}
