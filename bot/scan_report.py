@@ -18,11 +18,11 @@ for p in sol:
     if liq < C["min_liquidity_usd"]: why.append("liq<$15k")
     if vol < C["min_volume_24h_usd"]: why.append("vol<$50k")
     if not C["min_age_hours"] <= age <= C["max_age_hours"]: why.append("age out of range")
-    if not -5 < pc.get("h1", 0) <= C.get("max_h1_change_pct", 40): why.append("1h move out of range")
-    if pc.get("m5", 0) <= -5: why.append("dumping")
-    if b < 1.3 * max(s, 1): why.append("weak buy ratio")
+    if not C.get("min_h1_change_pct", -5) < pc.get("h1", 0) <= C.get("max_h1_change_pct", 40): why.append("1h move out of range")
+    if pc.get("m5", 0) <= C.get("min_m5_change_pct", -5): why.append("dumping")
+    if b < C.get("min_buy_ratio", 1.3) * max(s, 1): why.append("weak buy ratio")
     if b + s < 200: why.append("<200 trades")
-    if mc and vol > mc * 15: why.append("wash volume")
+    if mc and vol > mc * C.get("max_vol_mcap_ratio", 15): why.append("wash volume")
     if why: fails[why[0]] += 1
     else:
         ok, w, summ = bot.safety(ca); passed.append(f"${q['baseToken']['symbol']} ${mc/1000:.0f}k liq ${liq/1000:.0f}k safety {'PASS' if ok else 'BLOCKED: ' + w}")

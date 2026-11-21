@@ -28,5 +28,9 @@
   "community_link": "https://t.me/+pMCfTzv95v44YTZh",
   "cta_in_post": true,
   "cta_text": "Follow for more call-outs. Community: {link}",
-  "max_h1_change_pct": 60
+  "max_h1_change_pct": 60,
+  "min_h1_change_pct": -10,
+  "min_m5_change_pct": -8,
+  "min_buy_ratio": 1.2,
+  "max_vol_mcap_ratio": 25
 }
