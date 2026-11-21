@@ -251,8 +251,18 @@ def track():
         hit = [m for m in CFG["result_milestones"] if x["multiple"] >= m]
         done = int(x["status"].split("x")[0][3:] or 0) if x["status"].startswith("hit") else 0
         if hit and hit[-1] > done:  # post once per new milestone
-            post(f"${x['token']}: called at {fmt(float(x['mcap_at_call']))}, now {fmt(mc)} = {x['multiple']:.0f}x\n"
-                 f"Call: tracked from the original post.", reply_to=x["tweet_id"]); x["status"] = f"hit{hit[-1]}x"
+            text = (f"${x['token']}: called at {fmt(float(x['mcap_at_call']))}, now {fmt(mc)} = {x['multiple']:.1f}x\n"
+                    f"Call: tracked from the original post.")
+            import subprocess
+            png = f"{ROOT}/drafts/result-{x['id']}-{hit[-1]}x.png"; media = None
+            try:   # milestone posts carry a result card; if the card or upload fails the result still goes out as text
+                called = dt.datetime.fromisoformat(x["called_at_utc"]).strftime("%b %d, %H:%M UTC")
+                subprocess.run([sys.executable, f"{ROOT}/bot/result_card.py", x["token"], f"{x['multiple']:.1f}", f"{float(x['mcap_at_call'])/1000:.0f}",
+                                f"{mc/1000:.0f}", called, png], check=True, timeout=90)
+                media = "dry-media" if DRY else upload_image(png)
+            except Exception as e:
+                print(f"[WARN] result card failed ({e!r}); posting the result as text"); png = None
+            post(text, reply_to=x["tweet_id"], media=media, image=png); x["status"] = f"hit{hit[-1]}x"
         elif mc < float(x["mcap_at_call"]) * 0.1 or not q: x["status"] = "dead"
         age = (now - dt.datetime.fromisoformat(x["called_at_utc"])).days
         if age >= 14 and (x["status"] == "open" or x["status"].startswith("hit")): x["status"] = "closed"

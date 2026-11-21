@@ -9,9 +9,12 @@
   "max_calls_per_day": 8,
   "result_milestones": [
     2,
-    5,
+    4,
+    6,
     10,
-    25,
+    15,
+    20,
+    30,
     50,
     100
   ],
