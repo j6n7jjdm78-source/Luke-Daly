@@ -63,7 +63,9 @@ def call_out():
     _, q, mc, liq, age = best; sym = q["baseToken"]["symbol"]; ca = q["baseToken"]["address"]
     text = (f"${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age:.0f}h\n"
             f"Why: buys > sells last hour, 24h vol {fmt(q['volume']['h24'])}, liq/mcap {liq/mc:.0%}\n"
-            f"Risk: new token, can rug. Check mint/freeze authority yourself.\nCA: {ca}\n{CFG['disclosure']}")
+            f"Risk: new token, can rug. Check mint/freeze authority yourself.\nCA: {ca}")
+    if CFG["paid_promo"]: text += "\nPaid promotion."
+    elif CFG["i_hold_called_coins"]: text += "\nI hold this."
     tid = post(text)
     rs.append(dict(id=len(rs) + 1, token=sym, chain=CFG["chain"], contract=ca, called_at_utc=now.isoformat(), mcap_at_call=mc,
                    tweet_id=tid, status="open", current_mcap=mc, multiple=1.0, notes=""))
@@ -79,7 +81,7 @@ def track():
         done = int(x["status"].split("x")[0][3:] or 0) if x["status"].startswith("hit") else 0
         if hit and hit[-1] > done:  # post once per new milestone
             post(f"${x['token']}: called at {fmt(float(x['mcap_at_call']))}, now {fmt(mc)} = {x['multiple']:.0f}x\n"
-                 f"Tracking all calls, wins and losses.", reply_to=x["tweet_id"]); x["status"] = f"hit{hit[-1]}x"
+                 f"Call: tracked from the original post.", reply_to=x["tweet_id"]); x["status"] = f"hit{hit[-1]}x"
         elif mc < float(x["mcap_at_call"]) * 0.1 or not q: x["status"] = "dead"
         age = (now - dt.datetime.fromisoformat(x["called_at_utc"])).days
         if age >= 14 and x["status"] == "open": x["status"] = "closed"

@@ -7,7 +7,16 @@
   "max_age_hours": 48,
   "min_volume_24h_usd": 50000,
   "max_calls_per_day": 3,
-  "result_milestones": [2, 5, 10, 25, 50, 100],
-  "disclosure": "I don't hold this. Not financial advice, DYOR. Tracking all my calls.",
-  "dry_run": true
+  "result_milestones": [
+    2,
+    5,
+    10,
+    25,
+    50,
+    100
+  ],
+  "dry_run": true,
+  "i_hold_called_coins": false,
+  "paid_promo": false,
+  "bio_line": "Tracking every call, wins and losses. Not financial advice. DYOR."
 }
