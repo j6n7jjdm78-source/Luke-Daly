@@ -7,7 +7,7 @@ import cliperz_keys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CFG = json.load(open(f"{ROOT}/bot/config.json"))
 TOK = cliperz_keys.TOK  # ~/.config/cliperz-bot/tokens.json, außerhalb des Bot-Ordners
-FIELDS = "id,token,chain,contract,called_at_utc,mcap_at_call,tweet_id,status,current_mcap,multiple,notes".split(",")
+FIELDS = "id,token,chain,contract,called_at_utc,mcap_at_call,tweet_id,status,current_mcap,multiple,notes,peak_mcap".split(",")
 # Testlauf: config dry_run oder CLIPERZ_DRY=1 (start.mjs test). Probe-Calls landen in eigener Datei,
 # damit ein späterer Live-Lauf nie Ergebnis-Posts zu Coins schreibt, die nie öffentlich gecallt wurden.
 DRY = CFG["dry_run"] or os.environ.get("CLIPERZ_DRY") == "1"; now = dt.datetime.now(dt.timezone.utc)
@@ -238,6 +238,20 @@ def early_call_out():
             f"Safety: {safe}. Very new, most of these fail.\nCA: {ca}"), tier="EARLY")
         return
 
+def peak_since(q, called_iso):
+    """Highest market cap since the call, from 5-min price candles (GeckoTerminal). Uses candle highs but never more than
+    1.25x the best candle close, so a one-off bad wick cannot inflate a result. Returns None if history is unavailable."""
+    try:
+        pool, price, mc = q["pairAddress"], float(q["priceUsd"]), float(q["marketCap"])
+        d = gt_get(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool}/ohlcv/minute?aggregate=5&limit=1000&currency=usd")
+        t0 = dt.datetime.fromisoformat(called_iso).timestamp() - 300
+        cs = [c for c in d["data"]["attributes"]["ohlcv_list"] if c[0] >= t0]
+        if not cs or price <= 0: return None
+        hi, cl = max(c[2] for c in cs), max(c[4] for c in cs)
+        return mc * min(hi, 1.25 * cl) / price
+    except Exception:
+        return None
+
 def track():
     rs = rows()
     for x in rs:
@@ -248,17 +262,21 @@ def track():
             x["status"] = "rugged"; x["current_mcap"] = 0; x["multiple"] = 0.0; continue
         x["current_mcap"] = mc; x["multiple"] = round(mc / float(x["mcap_at_call"]), 2)
         if liq_now < 5000 or x["multiple"] > 1000: continue   # untrustworthy numbers: no milestone posts
-        hit = [m for m in CFG["result_milestones"] if x["multiple"] >= m]
+        # results show the PEAK multiple since the call (the most it could have gained), always labelled as a peak
+        pk = max(float(x.get("peak_mcap") or 0), mc, peak_since(q, x["called_at_utc"]) or 0)
+        x["peak_mcap"] = round(pk); peak_mult = pk / float(x["mcap_at_call"])
+        if peak_mult > 1000: continue
+        hit = [m for m in CFG["result_milestones"] if peak_mult >= m]
         done = int(x["status"].split("x")[0][3:] or 0) if x["status"].startswith("hit") else 0
         if hit and hit[-1] > done:  # post once per new milestone
-            text = (f"${x['token']}: called at {fmt(float(x['mcap_at_call']))}, now {fmt(mc)} = {x['multiple']:.1f}x\n"
-                    f"Call: tracked from the original post.")
+            text = (f"${x['token']}: called at {fmt(float(x['mcap_at_call']))}, peaked at {fmt(pk)} = {peak_mult:.1f}x\n"
+                    f"Peak since the call. Tracked from the original post.")
             import subprocess
             png = f"{ROOT}/drafts/result-{x['id']}-{hit[-1]}x.png"; media = None
             try:   # milestone posts carry a result card; if the card or upload fails the result still goes out as text
                 called = dt.datetime.fromisoformat(x["called_at_utc"]).strftime("%b %d, %H:%M UTC")
-                subprocess.run([sys.executable, f"{ROOT}/bot/result_card.py", x["token"], f"{x['multiple']:.1f}", f"{float(x['mcap_at_call'])/1000:.0f}",
-                                f"{mc/1000:.0f}", called, png], check=True, timeout=90)
+                subprocess.run([sys.executable, f"{ROOT}/bot/result_card.py", x["token"], f"{peak_mult:.1f}", f"{float(x['mcap_at_call'])/1000:.0f}",
+                                f"{pk/1000:.0f}", called, png], check=True, timeout=90)
                 media = "dry-media" if DRY else upload_image(png)
             except Exception as e:
                 print(f"[WARN] result card failed ({e!r}); posting the result as text"); png = None
