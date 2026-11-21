@@ -3,23 +3,28 @@ Env: X_CLIENT_ID, X_CLIENT_SECRET. Needs tokens.json from auth.py.
 Create a file named STOP in repo root to halt all posting."""
 import os, sys, csv, json, time, base64, datetime as dt, statistics as st
 import urllib.parse as u, urllib.request as r
+import cliperz_keys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CFG = json.load(open(f"{ROOT}/bot/config.json")); CALLS = f"{ROOT}/calls.csv"; TOK = f"{ROOT}/tokens.json"
+CFG = json.load(open(f"{ROOT}/bot/config.json"))
+TOK = cliperz_keys.TOK  # ~/.config/cliperz-bot/tokens.json, außerhalb des Bot-Ordners
 FIELDS = "id,token,chain,contract,called_at_utc,mcap_at_call,tweet_id,status,current_mcap,multiple,notes".split(",")
-DRY = CFG["dry_run"]; now = dt.datetime.now(dt.timezone.utc)
+# Testlauf: config dry_run oder CLIPERZ_DRY=1 (start.mjs test). Probe-Calls landen in eigener Datei,
+# damit ein späterer Live-Lauf nie Ergebnis-Posts zu Coins schreibt, die nie öffentlich gecallt wurden.
+DRY = CFG["dry_run"] or os.environ.get("CLIPERZ_DRY") == "1"; now = dt.datetime.now(dt.timezone.utc)
+CALLS = f"{ROOT}/calls-dry.csv" if DRY else f"{ROOT}/calls.csv"
+STATE = f"{ROOT}/state-dry" if DRY else f"{ROOT}/state"
 
 def http(url, data=None, headers=None, method=None):
-    h = {"User-Agent": "Mozilla/5.0 (compatible; cliperz-bot/1.0)", "Accept": "application/json"}
-    h.update(headers or {})
-    req = r.Request(url, data, h, method=method)
+    req = r.Request(url, data, {"User-Agent": "Mozilla/5.0 (compatible; cliperz-bot/1.0)", "Accept": "application/json", **(headers or {})}, method=method)
     return json.load(r.urlopen(req, timeout=20))
 
 def token():
     t = json.load(open(TOK))
     if time.time() - os.path.getmtime(TOK) > t.get("expires_in", 7200) - 300:  # refresh
-        a = base64.b64encode(f"{os.environ['X_CLIENT_ID']}:{os.environ['X_CLIENT_SECRET']}".encode()).decode()
+        cid, sec = cliperz_keys.load()
+        a = base64.b64encode(f"{cid}:{sec}".encode()).decode()
         t = http("https://api.x.com/2/oauth2/token", u.urlencode(dict(grant_type="refresh_token",
-                 refresh_token=t["refresh_token"], client_id=os.environ["X_CLIENT_ID"])).encode(),
+                 refresh_token=t["refresh_token"], client_id=cid)).encode(),
                  {"Authorization": "Basic " + a, "Content-Type": "application/x-www-form-urlencoded"})
         json.dump(t, open(TOK, "w"))
     return t["access_token"]
@@ -28,7 +33,7 @@ def post(text, reply_to=None):
     print(("[DRY RUN] " if DRY else "[POST] ") + text + "\n")
     if DRY: return "dry-" + str(int(time.time()))
     body = {"text": text}
-    if reply_to and not str(reply_to).startswith("dry-"): body["reply"] = {"in_reply_to_tweet_id": reply_to}
+    if reply_to and str(reply_to).isdigit(): body["reply"] = {"in_reply_to_tweet_id": reply_to}
     return http("https://api.x.com/2/tweets", json.dumps(body).encode(),
                 {"Authorization": "Bearer " + token(), "Content-Type": "application/json"})["data"]["id"]
 
@@ -54,7 +59,8 @@ def candidates():
         mc, liq, vol = q.get("marketCap") or 0, (q.get("liquidity") or {}).get("usd", 0), (q.get("volume") or {}).get("h24", 0)
         tx = (q.get("txns") or {}).get("h1", {})
         if (CFG["min_mcap_usd"] <= mc <= CFG["max_mcap_usd"] and liq >= CFG["min_liquidity_usd"] and vol >= CFG["min_volume_24h_usd"]
-                and CFG["min_age_hours"] <= age <= CFG["max_age_hours"] and tx.get("buys", 0) > tx.get("sells", 0) and liq / mc > 0.05):
+                and CFG["min_age_hours"] <= age <= CFG["max_age_hours"] and tx.get("buys", 0) > tx.get("sells", 0) and liq / mc > 0.05
+                and (q.get("priceChange") or {}).get("h1", 0) > -10 and vol <= mc * 15):
             yield vol, q, mc, liq, age
 
 def call_out():
@@ -86,15 +92,16 @@ def track():
                  f"Call: tracked from the original post.", reply_to=x["tweet_id"]); x["status"] = f"hit{hit[-1]}x"
         elif mc < float(x["mcap_at_call"]) * 0.1 or not q: x["status"] = "dead"
         age = (now - dt.datetime.fromisoformat(x["called_at_utc"])).days
-        if age >= 14 and x["status"] == "open": x["status"] = "closed"
+        if age >= 14 and (x["status"] == "open" or x["status"].startswith("hit")): x["status"] = "closed"
     save(rs)
 
 def scoreboard():
     if now.weekday() != 6 or now.hour < 17: return  # Sundays from 17:00 UTC, once per day
-    mark = f"{ROOT}/state/scoreboard-{now.date()}"; os.makedirs(f"{ROOT}/state", exist_ok=True)
+    mark = f"{STATE}/scoreboard-{now.date()}"; os.makedirs(STATE, exist_ok=True)
     if os.path.exists(mark): return
     open(mark, "w").close()
-    m = [float(x["multiple"]) for x in rows() if x["multiple"]]
+    week = now - dt.timedelta(days=7)  # nur Calls der letzten 7 Tage
+    m = [float(x["multiple"]) for x in rows() if x["multiple"] and dt.datetime.fromisoformat(x["called_at_utc"]) >= week]
     if m: post(f"Weekly scoreboard\nCalls: {len(m)} | 2x+: {sum(v >= 2 for v in m)} | Down 50%+: {sum(v <= .5 for v in m)}\n"
                f"Median: {st.median(m):.2f}x | Best: {max(m):.1f}x | Worst: {min(m):.2f}x")
 

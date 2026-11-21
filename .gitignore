@@ -2,3 +2,4 @@ tokens.json
 .env
 state/
 __pycache__/
+keys.env
