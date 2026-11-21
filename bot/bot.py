@@ -154,30 +154,50 @@ def early_safety(ca):
         return True, "ok", f"mint+freeze revoked | {cnt} holders | top10 {top10:.0f}%"
     return True, "ok", "mint+freeze revoked | holder data not available yet"
 
+def gt_get(url, tries=4):
+    """GeckoTerminal GET that waits and retries when rate limited (HTTP 429)."""
+    for i in range(tries):
+        try: return http(url)
+        except Exception as e:
+            if getattr(e, "code", None) == 429 and i < tries - 1: time.sleep(8 * (i + 1)); continue
+            raise
+
 def early_candidates():
+    """GeckoTerminal's new-pools list only reaches ~7 min back, so we keep a watchlist: note every new pool with real liquidity
+    (state/watch.json), then re-check each one when it is 15-60 min old using DexScreener's batch endpoint."""
     seen = {x["contract"] for x in rows()}
-    H = {"User-Agent": "Mozilla/5.0 (compatible; cliperz-bot/1.0)", "Accept": "application/json"}
-    for pg in range(1, 9):  # page back through new pools until we are past the 60 min mark
-        try: d = http(f"https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page={pg}", headers=H)["data"]
+    wf = f"{STATE}/watch.json"; os.makedirs(STATE, exist_ok=True)
+    try: watch = json.load(open(wf))
+    except Exception: watch = {}
+    for pg in range(1, 7):
+        try: d = gt_get(f"https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page={pg}")["data"]
         except Exception: break
-        oldest = 0
         for p in d:
             a = p["attributes"]
             try:
-                age_m = (now - dt.datetime.fromisoformat(a["pool_created_at"].replace("Z", "+00:00"))).total_seconds() / 60
+                created = dt.datetime.fromisoformat(a["pool_created_at"].replace("Z", "+00:00")).timestamp()
                 ca = p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1]
+                if float(a["reserve_in_usd"]) >= 4000 and ca not in watch: watch[ca] = created
             except Exception: continue
-            oldest = max(oldest, age_m)
-            if ca in seen or not (E["min_age_min"] <= age_m <= E["max_age_min"]): continue
-            q = pair(ca)
-            if not q: continue
+        time.sleep(3)
+    t_now = now.timestamp()
+    watch = {ca: t for ca, t in watch.items() if (t_now - t) / 60 <= 90}          # forget anything older than 90 min
+    json.dump(watch, open(wf, "w"))
+    due = [ca for ca, t in watch.items() if E["min_age_min"] <= (t_now - t) / 60 <= E["max_age_min"] and ca not in seen]
+    for i in range(0, len(due), 30):
+        try: pairs = http("https://api.dexscreener.com/tokens/v1/solana/" + ",".join(due[i:i + 30]))
+        except Exception: continue
+        best = {}
+        for q in pairs:
+            ca = q["baseToken"]["address"]
+            if ca not in best or (q.get("liquidity") or {}).get("usd", 0) > (best[ca].get("liquidity") or {}).get("usd", 0): best[ca] = q
+        for ca, q in best.items():
+            age_m = (t_now - watch[ca]) / 60
             mc, liq = q.get("marketCap") or 0, (q.get("liquidity") or {}).get("usd", 0)
             tx = (q.get("txns") or {}).get("h1", {}); b, sl = tx.get("buys", 0), tx.get("sells", 0); pc = q.get("priceChange") or {}
             if (E["min_mcap"] <= mc <= E["max_mcap"] and liq >= E["min_liq"] and b >= E["buy_ratio"] * max(sl, 1)
                     and b + sl >= E["min_trades"] and pc.get("m5", 0) > 0 and liq / mc > 0.1):
                 yield b / max(sl, 1), q, mc, liq, age_m
-        if oldest > E["max_age_min"]: break
-        time.sleep(2)
 
 def early_call_out():
     rs = rows()
