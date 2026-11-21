@@ -51,7 +51,10 @@ jobs:
           END=$((SECONDS + 1680))
           while [ $SECONDS -lt $END ]; do
             git fetch -q origin main 2>/dev/null && git cat-file -e origin/main:STOP 2>/dev/null && touch STOP   # kill switch from the repo
+            BEFORE="$(wc -l < calls.csv) $(md5sum ~/.config/cliperz-bot/tokens.json | cut -d' ' -f1) $(grep -c 'hit' calls.csv)"
             python3 bot/bot.py || echo "bot run failed, will retry in 2 minutes"
+            AFTER="$(wc -l < calls.csv) $(md5sum ~/.config/cliperz-bot/tokens.json | cut -d' ' -f1) $(grep -c 'hit' calls.csv)"
+            [ "$BEFORE" != "$AFTER" ] && bash deploy/save_state.sh   # new call, milestone, or refreshed login: save right away
             sleep 120
           done
       - name: Save X login (re-encrypted) and bot state
