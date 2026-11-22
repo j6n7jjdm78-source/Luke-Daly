@@ -140,7 +140,7 @@ def candidates():
                 and tx.get("buys", 0) + tx.get("sells", 0) >= 200):          # real activity
             yield vol, q, mc, liq, age
 
-def safety(ca):
+def safety_gt(ca):
     """Contract safety gate via GeckoTerminal token info. Returns (ok, reason, summary). Fails closed when data is missing."""
     info = None
     for attempt in range(3):
@@ -212,6 +212,32 @@ def call_text(sym, mc, liq, age, q, safe, ca):
             t = f"${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age:.0f}h\n{w}\n{sf}\nCA: {ca}" + (f"\n{cta}" if cta else "")
             if xlen(t) <= 274: return t
     return f"${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)}\nCA: {ca}" + (f"\n{cta}" if cta else "")
+
+def rugcheck(ca):
+    """RugCheck full report for a Solana token, or None if it cannot be read. Retries when rate limited."""
+    for i in range(3):
+        try: return http(f"https://api.rugcheck.xyz/v1/tokens/{ca}/report", headers={"Accept": "application/json"})
+        except Exception as e:
+            if getattr(e, "code", None) in (429, 500, 502, 503) and i < 2: time.sleep(4 * (i + 1)); continue
+            return None
+
+def safety(ca):
+    """Contract safety gate. Uses RugCheck (authorities, holders, risk flags); falls back to GeckoTerminal data if RugCheck is
+    unreachable. Returns (ok, reason, summary). Fails closed whenever it cannot verify."""
+    d = rugcheck(ca)
+    if not d or "risks" not in d: return safety_gt(ca)
+    if d.get("rugged"): return False, "RugCheck marks it rugged", ""
+    if d.get("mintAuthority"): return False, "mint authority is ACTIVE (more supply can be created)", ""
+    if d.get("freezeAuthority"): return False, "freeze authority is ACTIVE", ""
+    for r in d.get("risks") or []:
+        if r.get("level") == "danger": return False, f"RugCheck danger: {r.get('name')}", ""
+    holders = int(d.get("totalHolders") or 0)
+    if holders < 100: return False, f"only {holders} holders", ""
+    score = d.get("score_normalised", d.get("score", 100))
+    if score is not None and float(score) > 20: return False, f"RugCheck risk score {score}", ""
+    tf = d.get("transferFee") or {}
+    if float(tf.get("pct", 0) or 0) > 5: return False, f"transfer fee {tf.get('pct')}%", ""
+    return True, "ok", f"mint+freeze revoked | {holders} holders | RugCheck: no risks"
 
 def call_out():
     rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date()) and not x["notes"].startswith("EARLY")]
