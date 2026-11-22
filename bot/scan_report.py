@@ -15,7 +15,7 @@ for p in sol:
     tx = (q.get("txns") or {}).get("h1", {}); b, s = tx.get("buys", 0), tx.get("sells", 0); pc = q.get("priceChange") or {}
     why = []
     if not C["min_mcap_usd"] <= mc <= C["max_mcap_usd"]: why.append("mcap out of $20-300k")
-    if liq < C["min_liquidity_usd"]: why.append("liq<$15k")
+    if liq < C["min_liquidity_usd"]: why.append(f"liq<${C['min_liquidity_usd']/1000:.0f}k")
     if vol < C["min_volume_24h_usd"]: why.append("vol<$50k")
     if not C["min_age_hours"] <= age <= C["max_age_hours"]: why.append("age out of range")
     if not C.get("min_h1_change_pct", -5) < pc.get("h1", 0) <= C.get("max_h1_change_pct", 40): why.append("1h move out of range")
