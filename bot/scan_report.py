@@ -27,4 +27,4 @@ for p in sol:
     else:
         ok, w, summ = bot.safety(ca); passed.append(f"${q['baseToken']['symbol']} ${mc/1000:.0f}k liq ${liq/1000:.0f}k safety {'PASS' if ok else 'BLOCKED: ' + w}")
 print(f"{len(sol)} candidate tokens | " + ", ".join(f"{v} {k}" for k, v in fails.most_common(4)))
-print("PASSED FILTERS: " + ("; ".join(passed) if passed else "none"))
+print("PASSED MARKET FILTERS: " + ("; ".join(passed) if passed else "none"))

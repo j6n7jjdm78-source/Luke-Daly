@@ -149,12 +149,15 @@ def safety(ca):
         except Exception as e:
             time.sleep(3 * (attempt + 1))
     if not info: return False, "no safety data", ""
-    if info.get("mint_authority") != "no": return False, f"mint authority not revoked ({info.get('mint_authority')})", ""
-    if info.get("freeze_authority") != "no": return False, f"freeze authority not revoked ({info.get('freeze_authority')})", ""
+    for k, name in (("mint_authority", "mint"), ("freeze_authority", "freeze")):
+        v = info.get(k)
+        if v is None: return False, f"{name} authority UNKNOWN (no data yet)", ""
+        if v != "no": return False, f"{name} authority NOT revoked", ""
     if str(info.get("is_honeypot")).lower() == "yes": return False, "honeypot flag", ""
     h = info.get("holders") or {}
     try: cnt = int(h.get("count") or 0); top10 = float((h.get("distribution_percentage") or {}).get("top_10") or 100)
     except Exception: return False, "no holder data", ""
+    if not cnt: return False, "holder data UNKNOWN (no data yet)", ""
     if cnt < 100: return False, f"only {cnt} holders", ""
     if top10 > 55: return False, f"top 10 holders own {top10:.0f}%", ""
     return True, "ok", f"mint+freeze revoked | {cnt} holders | top10 {top10:.0f}%"
