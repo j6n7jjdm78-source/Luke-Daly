@@ -403,6 +403,48 @@ def scoreboard():
     lb = post(f"Top calls this week 🏆\nTop {len(top)} of {len(wk)} calls. Every call is logged.", media=media, image=png)
     cta_reply(lb, len(wk))
 
+def _once_today(tag):
+    """True the first time it is called on a given UTC day for this tag (state file marks it)."""
+    os.makedirs(STATE, exist_ok=True); mark = f"{STATE}/{tag}-{now.date()}"
+    if os.path.exists(mark): return False
+    open(mark, "w").close(); return True
+
+def daily_lesson(hour=14):
+    """One short safety lesson per day from content/lessons.json, in order. Every third one also carries the community link."""
+    if now.hour < hour or not _once_today("lesson"): return
+    try:
+        lessons = json.load(open(f"{ROOT}/content/lessons.json")); idxf = f"{STATE}/lesson_idx"
+        i = int(open(idxf).read()) if os.path.exists(idxf) else 0
+        text = lessons[i % len(lessons)]["text"]
+        if i % 3 == 2 and CFG.get("community_link"):
+            extra = f"\nCommunity: {CFG['community_link']}"
+            if xlen(text + extra) <= 278: text += extra
+        post(text); open(idxf, "w").write(str(i + 1))
+    except Exception as e:
+        print(f"[WARN] daily lesson failed ({e!r})"); os.remove(f"{STATE}/lesson-{now.date()}") if os.path.exists(f"{STATE}/lesson-{now.date()}") else None
+
+def daily_recap(hour=21):
+    """Daily picture: best PEAK multiples among the last 24h of calls, labelled as peaks, with how many calls and how many rugged."""
+    if now.hour < hour: return
+    day = now - dt.timedelta(hours=24)
+    rs = [x for x in rows() if dt.datetime.fromisoformat(x["called_at_utc"]) >= day]
+    if not rs or not _once_today("recap"): return
+    def peak(x): return max(float(x.get("peak_mcap") or 0), float(x["current_mcap"] or 0)) / float(x["mcap_at_call"])
+    rugged = [x for x in rs if x["status"] == "rugged"]
+    top = sorted([x for x in rs if x["status"] != "rugged" and peak(x) > 1.0], key=lambda x: -peak(x))[:5]
+    if not top: os.remove(f"{STATE}/recap-{now.date()}"); return
+    import subprocess
+    rj = f"{STATE}/recap_rows.json"; png = f"{ROOT}/drafts/recap-{now.date()}.png"
+    json.dump([[x["token"], round(peak(x), 2), x["notes"].startswith("EARLY")] for x in top], open(rj, "w"))
+    foot = f"Top {len(top)} of {len(rs)} calls in 24h" + (f" · {len(rugged)} rugged" if rugged else "") + " · peak multiples · NFA"
+    try:
+        subprocess.run([sys.executable, f"{ROOT}/bot/leaderboard.py", rj, str(len(rs)), png], check=True, timeout=90,
+                       env={**os.environ, "LB_TITLE": "DAILY RECAP", "LB_SUB": "PEAK MULTIPLES · LAST 24H", "LB_FOOT": foot})
+        media = "dry-media" if DRY else upload_image(png)
+    except Exception as e:
+        print(f"[SKIP] recap picture failed ({e!r})"); os.remove(f"{STATE}/recap-{now.date()}"); return
+    post(f"Daily recap 📊\n{len(rs)} calls in the last 24h. Best peaks shown, labeled as peaks (not current prices).\nCommunity: {CFG.get('community_link', '')}"[:280], media=media, image=png)
+
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
-    track(); call_out(); early_call_out(); scoreboard()
+    track(); call_out(); early_call_out(); scoreboard(); daily_recap(); daily_lesson()
