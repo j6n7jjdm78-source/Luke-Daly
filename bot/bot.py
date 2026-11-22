@@ -573,8 +573,28 @@ def daily_recap(hour=21):
         print(f"[SKIP] recap picture failed ({e!r})"); os.remove(f"{STATE}/recap-{now.date()}"); return
     post(f"Daily recap 📊\n{len(rs)} calls in the last 24h. Best peaks shown, labeled as peaks (not current prices).\nCommunity: {CFG.get('community_link', '')}"[:280], media=media, image=png)
 
+def daily_growth(hour=16):
+    """Once a day, private DM only: follower/post counts plus up to 4 ready-to-paste reply drafts for coins people are talking about
+    right now (they pass our scanner filters and the RugCheck gate). The owner pastes them by hand under other people's posts.
+    Nothing is ever posted or replied automatically."""
+    if now.hour < hour or DRY or not _once_today("growth"): return
+    try:
+        me = http("https://api.x.com/2/users/me?user.fields=public_metrics", headers={"Authorization": "Bearer " + token()})["data"]["public_metrics"]
+        head = f"📈 Growth check: {me.get('followers_count')} followers, {me.get('tweet_count')} posts."
+    except Exception: head = "📈 Growth check (follower count unavailable)."
+    drafts = []
+    for sc, q, mc, liq, age in sorted(candidates(), key=lambda t: -t[0])[:12]:
+        ca = q["baseToken"]["address"]; v = safety_rc(ca)
+        if not v or not v[0]: continue
+        sym = q["baseToken"].get("symbol")
+        t = f"Contract check on ${sym}: {v[2]}. Mcap {fmt(mc)}, liq {fmt(liq)}. Worth checking before aping. NFA"
+        if xlen(t) <= 280: drafts.append(t)
+        if len(drafts) >= 4: break
+    body = "\n\n".join(f"{i+1}) {d}" for i, d in enumerate(drafts)) or "No coin passed the safety check for a reply draft today."
+    owner_msg(f"{head}\n\nReply drafts to paste by hand under other people's call-outs (add value, no link-dropping):\n\n{body}")
+
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
-    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson):   # one failing stage must not skip the rest
+    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth):   # one failing stage must not skip the rest
         try: stage()
         except Exception as e: print(f"[WARN] {stage.__name__} failed this cycle: {type(e).__name__}: {str(e)[:100]}")
