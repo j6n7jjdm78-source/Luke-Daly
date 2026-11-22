@@ -11,3 +11,7 @@ state/*
 !state/scoreboard-*
 !state/candidates.csv
 !state/liqmax.json
+!state/lesson-*
+!state/lesson_idx
+!state/recap-*
+!state/growth-*

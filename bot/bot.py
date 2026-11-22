@@ -550,7 +550,10 @@ def daily_lesson(hour=14):
             if xlen(text + extra) <= 278: text += extra
         post(text); open(idxf, "w").write(str(i + 1))
     except Exception as e:
-        print(f"[WARN] daily lesson failed ({e!r})"); os.remove(f"{STATE}/lesson-{now.date()}") if os.path.exists(f"{STATE}/lesson-{now.date()}") else None
+        print(f"[WARN] daily lesson failed ({e!r})")
+        if getattr(e, "code", None) == 403:    # X refused it (duplicate text): skip to the next lesson and do not retry today
+            open(idxf, "w").write(str(i + 1)); return
+        os.remove(f"{STATE}/lesson-{now.date()}") if os.path.exists(f"{STATE}/lesson-{now.date()}") else None
 
 def daily_recap(hour=21):
     """Daily picture: best PEAK multiples among the last 24h of calls, labelled as peaks, with how many calls and how many rugged."""
