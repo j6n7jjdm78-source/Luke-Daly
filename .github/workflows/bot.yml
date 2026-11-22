@@ -40,7 +40,7 @@ jobs:
           [ -f state/tokens.enc ] && echo "state/tokens.enc: present" || echo "state/tokens.enc: MISSING"
       - name: Stop here in check mode
         if: ${{ github.event.inputs.mode == 'check' }}
-        run: echo "check mode: not running the bot"
+        run: echo "check mode - not running the bot"
       - uses: actions/setup-python@v5
         if: ${{ github.event.inputs.mode != 'check' }}
         with:
