@@ -1,12 +1,12 @@
 name: cliperz-bot
 # Runs the call-out bot on GitHub's free runners (public repo = unlimited minutes).
-# Each run stays alive ~28 minutes and runs the bot about once a minute inside it; the next run queues right behind it.
+# Each run stays alive ~45 minutes and runs the bot back to back (about every 1-2 minutes) inside it; the next run queues right behind it.
 # Kill switch: add an empty file named STOP to the repo root and posting stops.
 # Secrets use a CLIPERZ_ prefix so they never collide with the other project's TELEGRAM_* secrets in this repo.
 # Run it by hand with mode=check to see which secrets are present (prints only "set" or "MISSING", never the values).
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -22,7 +22,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 34
+    timeout-minutes: 50
     env:
       X_CLIENT_ID: ${{ secrets.CLIPERZ_X_CLIENT_ID }}
       X_CLIENT_SECRET: ${{ secrets.CLIPERZ_X_CLIENT_SECRET }}
@@ -68,10 +68,10 @@ jobs:
           mkdir -p ~/.config/cliperz-bot && chmod 700 ~/.config/cliperz-bot
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:TOKEN_KEY -in state/tokens.enc -out ~/.config/cliperz-bot/tokens.json
           chmod 600 ~/.config/cliperz-bot/tokens.json
-      - name: Run the bot about once a minute for ~28 minutes
+      - name: Run the bot back to back for ~45 minutes
         if: ${{ github.event.inputs.mode != 'check' && github.event.inputs.mode != 'test' }}
         run: |
-          END=$((SECONDS + 1680))
+          END=$((SECONDS + 2700))
           while [ $SECONDS -lt $END ]; do
             T0=$SECONDS
             git fetch -q origin main 2>/dev/null && git cat-file -e origin/main:STOP 2>/dev/null && touch STOP   # kill switch from the repo
@@ -79,7 +79,7 @@ jobs:
             python3 bot/bot.py || echo "bot run failed, will retry next minute"
             AFTER="$(wc -l < calls.csv) $(md5sum ~/.config/cliperz-bot/tokens.json | cut -d' ' -f1) $(grep -c 'hit' calls.csv) $(ls state | md5sum | cut -c1-8)"
             [ "$BEFORE" != "$AFTER" ] && bash deploy/save_state.sh   # new call, milestone, or refreshed login: save right away
-            USED=$((SECONDS - T0)); [ $USED -lt 60 ] && sleep $((60 - USED)); true
+            USED=$((SECONDS - T0)); [ $USED -lt 15 ] && sleep $((15 - USED)); true
           done
       - name: Test the login, X and Telegram (test mode only; posts nothing public)
         if: ${{ github.event.inputs.mode == 'test' }}
