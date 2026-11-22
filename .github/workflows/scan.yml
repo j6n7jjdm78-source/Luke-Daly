@@ -1,19 +1,19 @@
 name: Scan markets
 on:
   schedule:
-    - cron: "*/15 * * * *"   # every 15 minutes
+    - cron: "*/5 * * * *"    # every 5 minutes: full scan on the quarter hour, trade tracking in between
   workflow_dispatch:
     inputs:
       mode:
-        description: "scan | test (send a fake signal) | chat-id (find your channel id)"
+        description: "scan | track | test | chat-id | backtest"
         default: "test"
         type: choice
-        options: [test, chat-id, scan]
+        options: [test, test-btc-be-sl, chat-id, scan, track, backtest]
 concurrency: scan
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,6 +32,15 @@ jobs:
         run: |
           case "${{ github.event.inputs.mode || 'scan' }}" in
             test) python -m scanner.main --test ;;
+            test-btc-be-sl) python -m scanner.main --test --test-cases 5,6 ;;
             chat-id) python -m scanner.main --chat-id ;;
-            *) python -m scanner.main --once --source public ;;
+            backtest) python -m scanner.backtest --days 90 --sweep ;;
+            track) python -m scanner.main --once --track --source public ;;
+            *)
+              # scheduled runs: full scan in the first 5 minutes of each quarter hour, otherwise only follow open trades
+              if [ "${{ github.event_name }}" = "schedule" ] && [ $(( 10#$(date -u +%M) % 15 )) -ge 5 ]; then
+                python -m scanner.main --once --track --source public
+              else
+                python -m scanner.main --once --source public
+              fi ;;
           esac
