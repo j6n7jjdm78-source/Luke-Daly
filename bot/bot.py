@@ -500,25 +500,32 @@ def track():
         if age >= 14 and (x["status"] == "open" or x["status"].startswith("hit")): x["status"] = "closed"
     save(rs)
 
+def peak_mult(x):
+    """Best multiple a call reached after it was posted: highest recorded market cap (never lowered) over the market cap at the call."""
+    return max(float(x.get("peak_mcap") or 0), float(x.get("current_mcap") or 0)) / float(x["mcap_at_call"])
+
 def scoreboard():
-    """Sunday leaderboard: top 10 calls of the last 7 days that finished above their call price. Footer says how many calls the week had."""
+    """Sunday leaderboard picture: the best PEAK multiples among the last 7 days of calls, i.e. what someone could have had by buying
+    when we shared it. Labelled as peaks. Calls whose liquidity was pulled are not listed as wins, and nothing is posted about failures."""
     if now.weekday() != 6 or now.hour < 17: return  # Sundays from 17:00 UTC, once per day
     mark = f"{STATE}/scoreboard-{now.date()}"; os.makedirs(STATE, exist_ok=True)
     if os.path.exists(mark): return
     open(mark, "w").close()
     week = now - dt.timedelta(days=7)
-    wk = [x for x in rows() if x["multiple"] and dt.datetime.fromisoformat(x["called_at_utc"]) >= week]
-    top = sorted([x for x in wk if float(x["multiple"]) > 1.0], key=lambda x: -float(x["multiple"]))[:10]
-    if not top: return
+    wk = [x for x in rows() if dt.datetime.fromisoformat(x["called_at_utc"]) >= week]
+    top = sorted([x for x in wk if x["status"] != "rugged" and peak_mult(x) >= 1.25 and name_ok(x["token"])], key=lambda x: -peak_mult(x))[:10]
+    if not top: os.remove(mark); return
     import subprocess
     rj = f"{STATE}/lb_rows.json"; png = f"{ROOT}/drafts/leaderboard-{now.date()}.png"
-    json.dump([[x["token"], float(x["multiple"]), x["notes"].startswith("EARLY")] for x in top], open(rj, "w"))
+    json.dump([[x["token"], round(peak_mult(x), 2), x["notes"].startswith("EARLY")] for x in top], open(rj, "w"))
+    foot = f"Top {len(top)} of {len(wk)} calls this week · peak after our call · NFA"
     try:
-        subprocess.run([sys.executable, f"{ROOT}/bot/leaderboard.py", rj, str(len(wk)), png], check=True, timeout=90)
+        subprocess.run([sys.executable, f"{ROOT}/bot/leaderboard.py", rj, str(len(wk)), png], check=True, timeout=90,
+                       env={**os.environ, "LB_TITLE": "TOP CALLS", "LB_SUB": "PEAK MULTIPLES · THIS WEEK", "LB_FOOT": foot})
         media = "dry-media" if DRY else upload_image(png)
     except Exception as e:
         print(f"[SKIP] leaderboard picture failed ({e!r}); not posting a text-only leaderboard"); os.remove(mark); return
-    lb = post(f"Top calls this week 🏆\nTop {len(top)} of {len(wk)} calls. Every call is logged.", media=media, image=png)
+    lb = post(f"Top calls this week 🏆\nBest peak after each call: what you could have had buying when we shared it. Peaks, not current prices. NFA", media=media, image=png)
     cta_reply(lb, len(wk))
 
 def _once_today(tag):
@@ -547,14 +554,13 @@ def daily_recap(hour=21):
     day = now - dt.timedelta(hours=24)
     rs = [x for x in rows() if dt.datetime.fromisoformat(x["called_at_utc"]) >= day]
     if not rs or not _once_today("recap"): return
-    def peak(x): return max(float(x.get("peak_mcap") or 0), float(x["current_mcap"] or 0)) / float(x["mcap_at_call"])
-    rugged = [x for x in rs if x["status"] == "rugged"]
-    top = sorted([x for x in rs if x["status"] != "rugged" and peak(x) > 1.0], key=lambda x: -peak(x))[:5]
+    peak = peak_mult
+    top = sorted([x for x in rs if x["status"] != "rugged" and peak(x) > 1.0 and name_ok(x["token"])], key=lambda x: -peak(x))[:5]
     if not top: os.remove(f"{STATE}/recap-{now.date()}"); return
     import subprocess
     rj = f"{STATE}/recap_rows.json"; png = f"{ROOT}/drafts/recap-{now.date()}.png"
     json.dump([[x["token"], round(peak(x), 2), x["notes"].startswith("EARLY")] for x in top], open(rj, "w"))
-    foot = f"Top {len(top)} of {len(rs)} calls in 24h" + (f" · {len(rugged)} rugged" if rugged else "") + " · peak multiples · NFA"
+    foot = f"Top {len(top)} of {len(rs)} calls in 24h · peak after our call · NFA"
     try:
         subprocess.run([sys.executable, f"{ROOT}/bot/leaderboard.py", rj, str(len(rs)), png], check=True, timeout=90,
                        env={**os.environ, "LB_TITLE": "DAILY RECAP", "LB_SUB": "PEAK MULTIPLES · LAST 24H", "LB_FOOT": foot})
