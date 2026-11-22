@@ -9,3 +9,5 @@ state/*
 !state/watch.json
 !state/tokens.enc
 !state/scoreboard-*
+!state/candidates.csv
+!state/liqmax.json

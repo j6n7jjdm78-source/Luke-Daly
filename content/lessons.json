@@ -1,0 +1,44 @@
+[
+ {
+  "text": "30-second contract check before you buy any meme coin:\n1) Mint authority revoked?\n2) Freeze authority revoked?\n3) How many holders, and what % do the top 10 own?\nCan't answer all three? Skip it. rugcheck.xyz shows them free. NFA."
+ },
+ {
+  "text": "Liquidity is the exit door. A coin with $15k of liquidity can't take a $5k sell without a big price drop.\nBefore buying, ask: how much would I move the price if I sold? Size your buy to the pool, not the hype."
+ },
+ {
+  "text": "Market cap alone tells you little. A $100k coin with $5k of liquidity is far riskier than a $100k coin with $30k.\nAlways read market cap AND liquidity together."
+ },
+ {
+  "text": "Why we show the market cap at every call: so results can be checked.\n\"It did 10x\" means nothing without the starting number and the time. Ask any caller: at what market cap, and when?"
+ },
+ {
+  "text": "Peak vs now: a coin's peak multiple is its best moment, not what holding would have given you.\nGood callers label it. Our results are marked as peaks. Look for that label everywhere."
+ },
+ {
+  "text": "Rug pull basics: the developer removes the liquidity so nobody can sell.\nWarning signs: very few holders, one wallet owning a big share, liquidity not locked or burned, mint authority still active.\nNone is proof alone. Several together is a no."
+ },
+ {
+  "text": "Wash trading: if a coin's 24h volume is 20x+ its market cap, much of it may be bots trading with themselves.\nReal volume usually comes with a growing holder count. Be wary of huge volume on tiny caps."
+ },
+ {
+  "text": "Take profits in pieces. Nobody sells the exact top.\nSelling a third at 2x, a third at 4x and letting the rest ride keeps you in the game when a coin reverses.\nPlan your exit BEFORE you buy."
+ },
+ {
+  "text": "Slippage: low-liquidity memes can move 5-10% on a normal-size buy.\nIf your wallet shows high slippage, the pool is thin. Lower your size or skip it."
+ },
+ {
+  "text": "Age matters. Coins under an hour old have the highest rug rate.\nOur rule is simple: we skip the first hour. A little patience filters out a lot of traps."
+ },
+ {
+  "text": "Holder concentration: if the top 10 wallets own more than half the supply, a few people control the price.\nCheck it before you ape. Several free tools show it."
+ },
+ {
+  "text": "A call-out is not advice. Even a clean contract can fall 50% in an hour.\nNever put in money you can't afford to lose, and decide your exit before you enter."
+ },
+ {
+  "text": "Why most meme calls end up red: the early move happens before the post reaches you.\nCalling after a run means buying near the top. Check the 1h chart before acting on any call, ours included."
+ },
+ {
+  "text": "What to look for in a caller: the starting market cap on every call, results labeled peak vs now, and the misses acknowledged.\nOnly winners with no numbers is a red flag."
+ }
+]

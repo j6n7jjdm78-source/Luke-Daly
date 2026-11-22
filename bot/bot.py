@@ -2,7 +2,7 @@
 Env: X_CLIENT_ID, X_CLIENT_SECRET. Needs tokens.json from auth.py.
 Create a file named STOP in repo root to halt all posting."""
 import os, sys, csv, json, time, base64, datetime as dt, statistics as st
-import urllib.parse as u, urllib.request as r
+import urllib.parse as u, urllib.request as r, urllib.error
 import cliperz_keys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CFG = json.load(open(f"{ROOT}/bot/config.json"))
@@ -16,7 +16,12 @@ STATE = f"{ROOT}/state-dry" if DRY else f"{ROOT}/state"
 
 def http(url, data=None, headers=None, method=None):
     req = r.Request(url, data, {"User-Agent": "Mozilla/5.0 (compatible; cliperz-bot/1.0)", "Accept": "application/json", **(headers or {})}, method=method)
-    return json.load(r.urlopen(req, timeout=20))
+    for attempt in range(3):   # retry brief connection drops (HTTP errors such as 429 are handled by the callers)
+        try: return json.load(r.urlopen(req, timeout=20))
+        except urllib.error.HTTPError: raise
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+            if attempt == 2: raise
+            time.sleep(2 * (attempt + 1))
 
 def token():
     t = json.load(open(TOK))
@@ -109,6 +114,14 @@ def pair(addr):
     ps = [p for p in ps if p["chainId"] == CFG["chain"]]
     return max(ps, key=lambda p: (p.get("liquidity") or {}).get("usd", 0)) if ps else None
 
+def name_ok(*names):
+    """False if a coin's ticker or name contains a crude or offensive word. Short words must match as whole words (so 'assume' is fine)."""
+    import re
+    text = " ".join(n for n in names if n).lower()
+    for w in CFG.get("blocked_name_words", []):
+        if (len(w) <= 4 and re.search(r"(?<![a-z])" + re.escape(w) + r"(?![a-z])", text)) or (len(w) > 4 and w in text): return False
+    return True
+
 def candidate_addresses():
     """Two sources: DexScreener's newest Solana profiles, and GeckoTerminal's trending Solana pools (where coins with real volume show up)."""
     out = []
@@ -128,19 +141,20 @@ def candidates():
         if addr in seen: continue
         q = pair(addr)
         if not q or not q.get("pairCreatedAt"): continue
+        if not name_ok(q["baseToken"].get("symbol"), q["baseToken"].get("name")): continue
         age = (now.timestamp() * 1000 - q["pairCreatedAt"]) / 3.6e6
         mc, liq, vol = q.get("marketCap") or 0, (q.get("liquidity") or {}).get("usd", 0), (q.get("volume") or {}).get("h24", 0)
         tx = (q.get("txns") or {}).get("h1", {})
         if (CFG["min_mcap_usd"] <= mc <= CFG["max_mcap_usd"] and liq >= CFG["min_liquidity_usd"] and vol >= CFG["min_volume_24h_usd"]
                 and CFG["min_age_hours"] <= age <= CFG["max_age_hours"] and tx.get("buys", 0) > tx.get("sells", 0) and liq / mc > 0.05
-                and -5 < (q.get("priceChange") or {}).get("h1", 0) <= CFG.get("max_h1_change_pct", 40)   # not falling, not already pumped
-                and (q.get("priceChange") or {}).get("m5", 0) > -5            # not dumping right now
-                and vol <= mc * 15                                           # skip wash-trading volume
-                and tx.get("buys", 0) >= 1.3 * max(tx.get("sells", 0), 1)    # clear buy pressure
+                and CFG.get("min_h1_change_pct", -5) < (q.get("priceChange") or {}).get("h1", 0) <= CFG.get("max_h1_change_pct", 40)   # not falling, not already pumped
+                and (q.get("priceChange") or {}).get("m5", 0) > CFG.get("min_m5_change_pct", -5)            # not dumping right now
+                and vol <= mc * CFG.get("max_vol_mcap_ratio", 15)                                           # skip wash-trading volume
+                and tx.get("buys", 0) >= CFG.get("min_buy_ratio", 1.3) * max(tx.get("sells", 0), 1)    # clear buy pressure
                 and tx.get("buys", 0) + tx.get("sells", 0) >= 200):          # real activity
             yield vol, q, mc, liq, age
 
-def safety(ca):
+def safety_gt(ca):
     """Contract safety gate via GeckoTerminal token info. Returns (ok, reason, summary). Fails closed when data is missing."""
     info = None
     for attempt in range(3):
@@ -149,12 +163,15 @@ def safety(ca):
         except Exception as e:
             time.sleep(3 * (attempt + 1))
     if not info: return False, "no safety data", ""
-    if info.get("mint_authority") != "no": return False, f"mint authority not revoked ({info.get('mint_authority')})", ""
-    if info.get("freeze_authority") != "no": return False, f"freeze authority not revoked ({info.get('freeze_authority')})", ""
+    for k, name in (("mint_authority", "mint"), ("freeze_authority", "freeze")):
+        v = info.get(k)
+        if v is None: return False, f"{name} authority UNKNOWN (no data yet)", ""
+        if v != "no": return False, f"{name} authority NOT revoked", ""
     if str(info.get("is_honeypot")).lower() == "yes": return False, "honeypot flag", ""
     h = info.get("holders") or {}
     try: cnt = int(h.get("count") or 0); top10 = float((h.get("distribution_percentage") or {}).get("top_10") or 100)
     except Exception: return False, "no holder data", ""
+    if not cnt: return False, "holder data UNKNOWN (no data yet)", ""
     if cnt < 100: return False, f"only {cnt} holders", ""
     if top10 > 55: return False, f"top 10 holders own {top10:.0f}%", ""
     return True, "ok", f"mint+freeze revoked | {cnt} holders | top10 {top10:.0f}%"
@@ -210,6 +227,39 @@ def call_text(sym, mc, liq, age, q, safe, ca):
             if xlen(t) <= 274: return t
     return f"${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)}\nCA: {ca}" + (f"\n{cta}" if cta else "")
 
+def rugcheck(ca):
+    """RugCheck full report for a Solana token, or None if it cannot be read. Retries when rate limited."""
+    for i in range(3):
+        try: return http(f"https://api.rugcheck.xyz/v1/tokens/{ca}/report", headers={"Accept": "application/json"})
+        except Exception as e:
+            if getattr(e, "code", None) in (429, 500, 502, 503) and i < 2: time.sleep(4 * (i + 1)); continue
+            return None
+
+RC_LAST = {}   # contract -> last RugCheck report (used to log features for the candidates file)
+
+def safety_rc(ca, min_holders=100, max_score=20):
+    """RugCheck verdict: (ok, reason, summary), or None when RugCheck has no report for the token."""
+    d = rugcheck(ca)
+    if not d or "risks" not in d: return None
+    RC_LAST[ca] = d
+    if d.get("rugged"): return False, "RugCheck marks it rugged", ""
+    if d.get("mintAuthority"): return False, "mint authority is ACTIVE (more supply can be created)", ""
+    if d.get("freezeAuthority"): return False, "freeze authority is ACTIVE", ""
+    for r in d.get("risks") or []:
+        if r.get("level") == "danger": return False, f"RugCheck danger: {r.get('name')}", ""
+    holders = int(d.get("totalHolders") or 0)
+    if holders < min_holders: return False, f"only {holders} holders", ""
+    score = d.get("score_normalised", d.get("score", 100))
+    if score is not None and float(score) > max_score: return False, f"RugCheck risk score {score}", ""
+    tf = d.get("transferFee") or {}
+    if float(tf.get("pct", 0) or 0) > 5: return False, f"transfer fee {tf.get('pct')}%", ""
+    return True, "ok", f"mint+freeze revoked | {holders} holders | RugCheck: no risks"
+
+def safety(ca):
+    """Contract safety gate: RugCheck first, GeckoTerminal data as a fallback. Fails closed whenever it cannot verify."""
+    v = safety_rc(ca)
+    return v if v is not None else safety_gt(ca)
+
 def call_out():
     rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date()) and not x["notes"].startswith("EARLY")]
     if len(today) >= CFG["max_calls_per_day"]: return
@@ -223,26 +273,16 @@ def call_out():
     publish_call(q, mc, liq, call_text(sym, mc, liq, age, q, safe, ca))
 
 # ---------- EARLY tier: 15-60 min old tokens, clearly labelled high risk ----------
-E = dict(min_age_min=15, max_age_min=60, min_mcap=10000, max_mcap=60000, min_liq=8000, buy_ratio=2.0, min_trades=150, max_per_day=2)
+E = dict(min_age_min=CFG.get("early_min_age_min", 5), max_age_min=CFG.get("early_max_age_min", 45), min_mcap=CFG.get("early_min_mcap", 10000),
+         max_mcap=CFG.get("early_max_mcap", 60000), min_liq=CFG.get("early_min_liq", 8000), buy_ratio=CFG.get("early_buy_ratio", 1.5),
+         min_trades=CFG.get("early_min_trades", 100), max_per_day=CFG.get("early_max_per_day", 3), max_run_pct=CFG.get("early_max_run_pct", 100),
+         pages=CFG.get("early_pages", 6), min_holders=CFG.get("early_min_holders", 50), max_score=CFG.get("early_max_score", 30))
 
 def early_safety(ca):
-    """Needs mint+freeze revoked (required). Holder data is often not available yet at this age; if present it must look sane."""
-    info = None
-    for attempt in range(3):
-        try: info = http(f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{ca}/info")["data"]["attributes"]; break
-        except Exception: time.sleep(3 * (attempt + 1))
-    if not info: return False, "no safety data", ""
-    if info.get("mint_authority") != "no": return False, f"mint authority not confirmed revoked ({info.get('mint_authority')})", ""
-    if info.get("freeze_authority") != "no": return False, f"freeze authority not confirmed revoked ({info.get('freeze_authority')})", ""
-    if str(info.get("is_honeypot")).lower() == "yes": return False, "honeypot flag", ""
-    h = info.get("holders") or {}
-    try: cnt = int(h.get("count") or 0); top10 = float((h.get("distribution_percentage") or {}).get("top_10") or 0)
-    except Exception: cnt, top10 = 0, 0
-    if cnt:
-        if cnt < 50: return False, f"only {cnt} holders", ""
-        if top10 > 60: return False, f"top 10 holders own {top10:.0f}%", ""
-        return True, "ok", f"mint+freeze revoked | {cnt} holders | top10 {top10:.0f}%"
-    return True, "ok", "mint+freeze revoked | holder data not available yet"
+    """New-pair tier: RugCheck must have a report. Thresholds are a little looser than normal calls (holders, risk score), but
+    mint/freeze must be revoked and any RugCheck 'danger' flag still blocks. No weaker fallback for brand-new tokens."""
+    v = safety_rc(ca, min_holders=E["min_holders"], max_score=E["max_score"])
+    return v if v is not None else (False, "no RugCheck report yet", "")
 
 def gt_get(url, tries=4):
     """GeckoTerminal GET that waits and retries when rate limited (HTTP 429)."""
@@ -252,14 +292,67 @@ def gt_get(url, tries=4):
             if getattr(e, "code", None) == 429 and i < tries - 1: time.sleep(8 * (i + 1)); continue
             raise
 
+CAND_FIELDS = "ca,symbol,eval_utc,age_m,mcap,liq,holders,score,flags,buys,sells,m5,h1,run_pct,decision,reason,price0,m1h,m3h,m6h".split(",")
+
+def cand_rows():
+    f = f"{STATE}/candidates.csv"
+    return list(csv.DictReader(open(f))) if os.path.exists(f) else []
+
+def cand_save(rs):
+    os.makedirs(STATE, exist_ok=True)
+    w = csv.DictWriter(open(f"{STATE}/candidates.csv", "w", newline=""), CAND_FIELDS, extrasaction="ignore"); w.writeheader(); w.writerows(rs)
+
+def log_candidate(ca, q, age_m, run, decision, reason):
+    """Record a coin the first time it reaches the safety stage, with the features we may want to learn from. Outcomes are filled in later."""
+    rs = cand_rows()
+    if any(x["ca"] == ca for x in rs): return
+    d = RC_LAST.get(ca) or {}; tx = (q.get("txns") or {}).get("h1", {}); pc = q.get("priceChange") or {}
+    rs.append(dict(ca=ca, symbol=q["baseToken"]["symbol"], eval_utc=now.isoformat(timespec="seconds"), age_m=round(age_m), mcap=round(q.get("marketCap") or 0),
+                   liq=round((q.get("liquidity") or {}).get("usd", 0)), holders=d.get("totalHolders", ""), score=d.get("score_normalised", ""),
+                   flags="|".join(str(x.get("name")) for x in (d.get("risks") or []) if x.get("level") in ("danger", "warn")),
+                   buys=tx.get("buys", ""), sells=tx.get("sells", ""), m5=pc.get("m5", ""), h1=pc.get("h1", ""), run_pct=round(run * 100) if run is not None else "",
+                   decision=decision, reason=reason, price0=q.get("priceUsd", ""), m1h="", m3h="", m6h=""))
+    cand_save(rs)
+
+def mark_candidate(ca, decision):
+    rs = cand_rows()
+    for x in rs:
+        if x["ca"] == ca: x["decision"] = decision
+    cand_save(rs)
+
+def track_candidates():
+    """Fill in how each logged candidate did 1h / 3h / 6h later (price multiple vs its price when evaluated; 0 = liquidity gone)."""
+    rs = cand_rows(); due = []
+    for x in rs:
+        el = (now - dt.datetime.fromisoformat(x["eval_utc"])).total_seconds() / 3600
+        need = [k for k, h in (("m1h", 1), ("m3h", 3), ("m6h", 6)) if not x[k] and el >= h]
+        if need and x["price0"]: due.append((x, need))
+    if not due: return
+    for i in range(0, len(due), 30):
+        chunk = due[i:i + 30]
+        try: pairs = http("https://api.dexscreener.com/tokens/v1/solana/" + ",".join(x["ca"] for x, _ in chunk))
+        except Exception: continue
+        best = {}
+        for q in pairs:
+            ca = q["baseToken"]["address"]
+            if ca not in best or (q.get("liquidity") or {}).get("usd", 0) > (best[ca].get("liquidity") or {}).get("usd", 0): best[ca] = q
+        for x, need in chunk:
+            q = best.get(x["ca"]); liq = (q.get("liquidity") or {}).get("usd", 0) if q else 0
+            try: mult = 0.0 if (not q or liq < 1000) else round(float(q["priceUsd"]) / float(x["price0"]), 2)
+            except Exception: continue
+            for k in need: x[k] = mult
+    cand_save(rs)
+
 def early_candidates():
-    """GeckoTerminal's new-pools list only reaches ~7 min back, so we keep a watchlist: note every new pool with real liquidity
-    (state/watch.json), then re-check each one when it is 15-60 min old using DexScreener's batch endpoint."""
+    """GeckoTerminal's new-pools list only reaches a few minutes back, so we keep a watchlist: note every new pool with real liquidity
+    and its price at first sight (state/watch.json), then re-check each one while it is 5-45 min old using DexScreener's batch endpoint.
+    A coin that has already run up more than early_max_run_pct since first sight is skipped (that is calling after the move)."""
     seen = {x["contract"] for x in rows()}
     wf = f"{STATE}/watch.json"; os.makedirs(STATE, exist_ok=True)
-    try: watch = json.load(open(wf))
-    except Exception: watch = {}
-    for pg in range(1, 7):
+    try: raw = json.load(open(wf))
+    except Exception: raw = {}
+    watch = {ca: (v if isinstance(v, dict) else {"t": v, "p0": None}) for ca, v in raw.items()}   # older files stored just the timestamp
+    for pg in range(1, E["pages"] + 1):
         try: d = gt_get(f"https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page={pg}")["data"]
         except Exception: break
         for p in d:
@@ -267,13 +360,14 @@ def early_candidates():
             try:
                 created = dt.datetime.fromisoformat(a["pool_created_at"].replace("Z", "+00:00")).timestamp()
                 ca = p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1]
-                if float(a["reserve_in_usd"]) >= 4000 and ca not in watch: watch[ca] = created
+                if float(a["reserve_in_usd"]) >= 4000 and ca not in watch:
+                    watch[ca] = {"t": created, "p0": float(a.get("base_token_price_usd") or 0) or None}
             except Exception: continue
         time.sleep(3)
     t_now = now.timestamp()
-    watch = {ca: t for ca, t in watch.items() if (t_now - t) / 60 <= 90}          # forget anything older than 90 min
+    watch = {ca: w for ca, w in watch.items() if (t_now - w["t"]) / 60 <= 90}          # forget anything older than 90 min
     json.dump(watch, open(wf, "w"))
-    due = [ca for ca, t in watch.items() if E["min_age_min"] <= (t_now - t) / 60 <= E["max_age_min"] and ca not in seen]
+    due = [ca for ca, w in watch.items() if E["min_age_min"] <= (t_now - w["t"]) / 60 <= E["max_age_min"] and ca not in seen]
     for i in range(0, len(due), 30):
         try: pairs = http("https://api.dexscreener.com/tokens/v1/solana/" + ",".join(due[i:i + 30]))
         except Exception: continue
@@ -282,25 +376,37 @@ def early_candidates():
             ca = q["baseToken"]["address"]
             if ca not in best or (q.get("liquidity") or {}).get("usd", 0) > (best[ca].get("liquidity") or {}).get("usd", 0): best[ca] = q
         for ca, q in best.items():
-            age_m = (t_now - watch[ca]) / 60
+            if not name_ok(q["baseToken"].get("symbol"), q["baseToken"].get("name")): continue
+            w = watch[ca]; age_m = (t_now - w["t"]) / 60
             mc, liq = q.get("marketCap") or 0, (q.get("liquidity") or {}).get("usd", 0)
             tx = (q.get("txns") or {}).get("h1", {}); b, sl = tx.get("buys", 0), tx.get("sells", 0); pc = q.get("priceChange") or {}
+            try: run = float(q["priceUsd"]) / w["p0"] - 1 if w.get("p0") else None
+            except Exception: run = None
+            if run is not None and run * 100 > E["max_run_pct"]: continue            # already ran: do not chase
             if (E["min_mcap"] <= mc <= E["max_mcap"] and liq >= E["min_liq"] and b >= E["buy_ratio"] * max(sl, 1)
                     and b + sl >= E["min_trades"] and pc.get("m5", 0) > 0 and liq / mc > 0.1):
-                yield b / max(sl, 1), q, mc, liq, age_m
+                yield b / max(sl, 1), q, mc, liq, age_m, run
 
 def early_call_out():
     if not CFG.get("early_enabled", True): return
     rs = rows()
     if len([x for x in rs if x["called_at_utc"][:10] == str(now.date()) and x["notes"].startswith("EARLY")]) >= E["max_per_day"]: return
-    for c in sorted(early_candidates(), key=lambda c: -c[0])[:3]:
-        _, q, mc, liq, age_m = c; ca = q["baseToken"]["address"]; sym = q["baseToken"]["symbol"]
+    for c in sorted(early_candidates(), key=lambda c: -c[0])[:5]:
+        _, q, mc, liq, age_m, run = c; ca = q["baseToken"]["address"]; sym = q["baseToken"]["symbol"]
         ok, why, safe = early_safety(ca)
+        log_candidate(ca, q, age_m, run, "pass" if ok else "blocked", "" if ok else why)
         if not ok: print(f"[SKIP early] {sym}: {why}"); continue
         tx = q["txns"]["h1"]
-        publish_call(q, mc, liq, (f"EARLY / HIGH RISK\n${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age_m:.0f}m\n"
-            f"Why: {tx['buys']} buys vs {tx['sells']} sells, price {q['priceChange'].get('m5', 0):+.0f}% last 5m\n"
-            f"Safety: {safe}. Very new, most of these fail.\nCA: {ca}"), tier="EARLY")
+        cta = CFG["cta_text"].format(link=CFG["community_link"]) if CFG.get("cta_in_post") and CFG.get("community_link") else ""
+        m5 = q["priceChange"].get("m5", 0)
+        for why in (f"{tx['buys']} buys vs {tx['sells']} sells, 5m {m5:+.0f}%", f"buys {tx['buys']}/{tx['sells']} sells"):
+            for sf in (f"Safety: {safe}. Very new, most fail.", f"Safety: {safe.replace(' | ', ', ')}. Can rug."):
+                text = f"EARLY / HIGH RISK\n${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age_m:.0f}m\nWhy: {why}\n{sf}\nCA: {ca}" + (f"\n{cta}" if cta else "")
+                if xlen(text) <= 274: break
+            else: continue
+            break
+        publish_call(q, mc, liq, text, tier="EARLY")
+        if any(x["contract"] == ca for x in rows()): mark_candidate(ca, "posted")
         return
 
 def peak_since(q, called_iso):
@@ -317,14 +423,32 @@ def peak_since(q, called_iso):
     except Exception:
         return None
 
+def record_rug():
+    """Circuit breaker: if N calls rug within 24h, pause all posting (STOP file) and tell the owner. The owner resumes by asking."""
+    f = f"{STATE}/rug_events.json"
+    try: ev = [t for t in json.load(open(f)) if now.timestamp() - t < 86400]
+    except Exception: ev = []
+    ev.append(now.timestamp()); json.dump(ev, open(f, "w"))
+    if len(ev) >= CFG.get("circuit_breaker_rugs", 2) and not DRY:
+        open(f"{ROOT}/STOP", "w").write("circuit breaker")
+        owner_msg(f"⛔ CIRCUIT BREAKER: {len(ev)} calls rugged within 24h. All posting is PAUSED. Tell Claude 'resume' once you have looked at it.")
+
 def track():
     rs = rows()
     for x in rs:
         if x["status"] not in ("open",) and not x["status"].startswith("hit"): continue
         q = pair(x["contract"]); mc = float((q or {}).get("marketCap") or 0)
         liq_now = float(((q or {}).get("liquidity") or {}).get("usd") or 0); m5 = float(((q or {}).get("priceChange") or {}).get("m5") or 0)
+        try:   # liquidity-drain alert to the owner (private): a called coin lost >30% of its best liquidity and is now under $12k
+            lf = f"{STATE}/liqmax.json"; lm = json.load(open(lf)) if os.path.exists(lf) else {}
+            e = lm.setdefault(str(x["id"]), {"max": 0, "alerted": False}); e["max"] = max(e["max"], liq_now)
+            if q and liq_now < 12000 and liq_now < 0.7 * e["max"] and not e["alerted"] and x["status"] != "rugged":
+                e["alerted"] = True; owner_msg(f"⚠️ Liquidity draining on ${x['token']}: ${liq_now/1000:.1f}k (was ${e['max']/1000:.1f}k). Possible rug.")
+            json.dump(lm, open(lf, "w"))
+        except Exception: pass
         if not q or liq_now < 1000 or m5 <= -80:      # liquidity pulled / price collapsed: it is a rug, never a "result"
-            if x["status"] != "rugged": owner_msg(f"⚠️ ${x['token']} RUGGED: liquidity pulled or price collapsed. Logged as a loss.")
+            if x["status"] != "rugged":
+                owner_msg(f"⚠️ ${x['token']} RUGGED: liquidity pulled or price collapsed. Logged as a loss."); record_rug()
             x["status"] = "rugged"; x["current_mcap"] = 0; x["multiple"] = 0.0; continue
         x["current_mcap"] = mc; x["multiple"] = round(mc / float(x["mcap_at_call"]), 2)
         if liq_now < 5000 or x["multiple"] > 1000: continue   # untrustworthy numbers: no milestone posts
@@ -333,7 +457,7 @@ def track():
         x["peak_mcap"] = round(pk); peak_mult = pk / float(x["mcap_at_call"])
         if peak_mult > 1000: continue
         hit = [m for m in CFG["result_milestones"] if peak_mult >= m]
-        done = int(x["status"].split("x")[0][3:] or 0) if x["status"].startswith("hit") else 0
+        done = float(x["status"][3:].rstrip("x") or 0) if x["status"].startswith("hit") else 0
         if hit and hit[-1] > done:  # post once per new milestone
             text = (f"${x['token']}: called at {fmt(float(x['mcap_at_call']))}, peaked at {fmt(pk)} = {peak_mult:.1f}x\n"
                     f"Peak since the call. Tracked from the original post.")
@@ -374,6 +498,50 @@ def scoreboard():
     lb = post(f"Top calls this week 🏆\nTop {len(top)} of {len(wk)} calls. Every call is logged.", media=media, image=png)
     cta_reply(lb, len(wk))
 
+def _once_today(tag):
+    """True the first time it is called on a given UTC day for this tag (state file marks it)."""
+    os.makedirs(STATE, exist_ok=True); mark = f"{STATE}/{tag}-{now.date()}"
+    if os.path.exists(mark): return False
+    open(mark, "w").close(); return True
+
+def daily_lesson(hour=14):
+    """One short safety lesson per day from content/lessons.json, in order. Every third one also carries the community link."""
+    if now.hour < hour or not _once_today("lesson"): return
+    try:
+        lessons = json.load(open(f"{ROOT}/content/lessons.json")); idxf = f"{STATE}/lesson_idx"
+        i = int(open(idxf).read()) if os.path.exists(idxf) else 0
+        text = lessons[i % len(lessons)]["text"]
+        if i % 3 == 2 and CFG.get("community_link"):
+            extra = f"\nCommunity: {CFG['community_link']}"
+            if xlen(text + extra) <= 278: text += extra
+        post(text); open(idxf, "w").write(str(i + 1))
+    except Exception as e:
+        print(f"[WARN] daily lesson failed ({e!r})"); os.remove(f"{STATE}/lesson-{now.date()}") if os.path.exists(f"{STATE}/lesson-{now.date()}") else None
+
+def daily_recap(hour=21):
+    """Daily picture: best PEAK multiples among the last 24h of calls, labelled as peaks, with how many calls and how many rugged."""
+    if now.hour < hour: return
+    day = now - dt.timedelta(hours=24)
+    rs = [x for x in rows() if dt.datetime.fromisoformat(x["called_at_utc"]) >= day]
+    if not rs or not _once_today("recap"): return
+    def peak(x): return max(float(x.get("peak_mcap") or 0), float(x["current_mcap"] or 0)) / float(x["mcap_at_call"])
+    rugged = [x for x in rs if x["status"] == "rugged"]
+    top = sorted([x for x in rs if x["status"] != "rugged" and peak(x) > 1.0], key=lambda x: -peak(x))[:5]
+    if not top: os.remove(f"{STATE}/recap-{now.date()}"); return
+    import subprocess
+    rj = f"{STATE}/recap_rows.json"; png = f"{ROOT}/drafts/recap-{now.date()}.png"
+    json.dump([[x["token"], round(peak(x), 2), x["notes"].startswith("EARLY")] for x in top], open(rj, "w"))
+    foot = f"Top {len(top)} of {len(rs)} calls in 24h" + (f" · {len(rugged)} rugged" if rugged else "") + " · peak multiples · NFA"
+    try:
+        subprocess.run([sys.executable, f"{ROOT}/bot/leaderboard.py", rj, str(len(rs)), png], check=True, timeout=90,
+                       env={**os.environ, "LB_TITLE": "DAILY RECAP", "LB_SUB": "PEAK MULTIPLES · LAST 24H", "LB_FOOT": foot})
+        media = "dry-media" if DRY else upload_image(png)
+    except Exception as e:
+        print(f"[SKIP] recap picture failed ({e!r})"); os.remove(f"{STATE}/recap-{now.date()}"); return
+    post(f"Daily recap 📊\n{len(rs)} calls in the last 24h. Best peaks shown, labeled as peaks (not current prices).\nCommunity: {CFG.get('community_link', '')}"[:280], media=media, image=png)
+
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
-    track(); call_out(); early_call_out(); scoreboard()
+    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson):   # one failing stage must not skip the rest
+        try: stage()
+        except Exception as e: print(f"[WARN] {stage.__name__} failed this cycle: {type(e).__name__}: {str(e)[:100]}")
