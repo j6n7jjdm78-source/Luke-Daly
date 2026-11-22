@@ -38,3 +38,14 @@ def test_signals_valid_and_no_lookahead():
                 s2 = evaluate("X", m15.iloc[:i + 1], h1, min_touches=2, i=-1)
                 assert s2 and s2.side == s.side and abs(s2.sl - s.sl) < 1e-9
     print("signals found:", found)
+
+
+def test_backtest_simulation_runs_and_outcomes_valid():
+    from scanner.backtest import simulate, summarize
+    tr = []
+    for seed in range(6):
+        tr += simulate("X", synth(1600, "15min", seed), synth(400, "1h", seed), min_touches=2)
+    for t in tr:
+        assert t["outcome"] in ("TP", "SL", "timeout")
+        assert t["outcome"] != "SL" or t["r"] == -1.0
+    assert isinstance(summarize(tr), str)

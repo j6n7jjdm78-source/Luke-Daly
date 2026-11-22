@@ -5,15 +5,15 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "scan | test (send a fake signal) | chat-id (find your channel id)"
+        description: "scan | test | chat-id | backtest"
         default: "test"
         type: choice
-        options: [test, chat-id, scan]
+        options: [test, chat-id, scan, backtest]
 concurrency: scan
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,5 +33,6 @@ jobs:
           case "${{ github.event.inputs.mode || 'scan' }}" in
             test) python -m scanner.main --test ;;
             chat-id) python -m scanner.main --chat-id ;;
+            backtest) python -m scanner.backtest --days 90 ;;
             *) python -m scanner.main --once --source public ;;
           esac
