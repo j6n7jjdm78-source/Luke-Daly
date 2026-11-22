@@ -81,5 +81,6 @@
     "isis",
     "suicide"
   ],
-  "circuit_breaker_rugs": 2
+  "circuit_breaker_rugs": 2,
+  "min_score": 40
 }

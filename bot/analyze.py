@@ -18,6 +18,7 @@ def bucket(name, key, edges):
         if not g: continue
         two = sum(num(r["m3h"]) >= 2 for r in g); rug = sum(num(r["m3h"]) == 0 for r in g); up = sum(num(r["m3h"]) >= 1 for r in g)
         print(f"  {lo:>6}-{hi:<6} n={len(g):<3} >=2x: {two/len(g):4.0%}  >=1x: {up/len(g):4.0%}  rugged: {rug/len(g):4.0%}")
+bucket("Our quality score at evaluation (normal tier)", "qscore", [0, 55, 65, 75, 101])
 bucket("Holders at evaluation", "holders", [0, 100, 300, 1000, 10**9])
 bucket("RugCheck score (lower = safer)", "score", [0, 5, 20, 40, 101])
 bucket("Age when evaluated (min)", "age_m", [0, 10, 20, 30, 60])

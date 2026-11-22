@@ -123,17 +123,36 @@ def name_ok(*names):
     return True
 
 def candidate_addresses():
-    """Two sources: DexScreener's newest Solana profiles, and GeckoTerminal's trending Solana pools (where coins with real volume show up)."""
+    """Where we look for coins: DexScreener's newest profiles and boosted lists, and GeckoTerminal's trending pools (default, 1h, 6h)
+    plus the top pools by 24h volume. Deduplicated. More sources = more coins to judge, every one still goes through the same filters."""
     out = []
-    try: out += [p["tokenAddress"] for p in http("https://api.dexscreener.com/token-profiles/latest/v1") if p["chainId"] == CFG["chain"]]
-    except Exception: pass
-    for pg in (1, 2):
+    ch = CFG["chain"]
+    for url in ("https://api.dexscreener.com/token-profiles/latest/v1", "https://api.dexscreener.com/token-boosts/latest/v1",
+                "https://api.dexscreener.com/token-boosts/top/v1"):
+        try: out += [p["tokenAddress"] for p in http(url) if p.get("chainId") == ch]
+        except Exception: pass
+    for path in ("trending_pools?page=1", "trending_pools?page=2", "trending_pools?duration=1h&page=1", "trending_pools?duration=6h&page=1",
+                 "pools?sort=h24_volume_usd_desc&page=1"):
         try:
-            for p in gt_get(f"https://api.geckoterminal.com/api/v2/networks/{CFG['chain']}/trending_pools?page={pg}")["data"]:
+            for p in gt_get(f"https://api.geckoterminal.com/api/v2/networks/{ch}/{path}")["data"]:
                 out.append(p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1])
-        except Exception: break
+        except Exception: pass
         time.sleep(2)
     return list(dict.fromkeys(out))
+
+def quality_score(q, mc, liq, vol):
+    """0-100 ranking of a coin that already passed the hard filters: buying pressure, liquidity depth, healthy liquidity/mcap,
+    momentum in a sweet spot (rising, not exhausted), and sane volume. It orders candidates and sets a minimum bar (min_score)."""
+    tx = (q.get("txns") or {}).get("h1", {}); b, sl = tx.get("buys", 0), tx.get("sells", 0); pc = q.get("priceChange") or {}
+    h1, m5 = pc.get("h1", 0) or 0, pc.get("m5", 0) or 0
+    sc = min(b / max(sl, 1), 2.5) / 2.5 * 30                      # buying pressure
+    sc += min(liq / 60000, 1) * 20                                # liquidity depth
+    sc += min((liq / mc) / 0.4, 1) * 10 if mc else 0              # liquidity relative to size
+    sc += 20 if 5 <= h1 <= 40 else 10 if (0 <= h1 < 5 or 40 < h1 <= 60) else 0     # momentum sweet spot
+    sc += 10 if m5 >= 0 else 0                                    # still moving up right now
+    ratio = vol / mc if mc else 99
+    sc += 10 if 2 <= ratio <= 12 else 5 if ratio < 2 else 0       # volume neither dead nor wash-like
+    return round(sc)
 
 def candidates():
     seen = {x["contract"] for x in rows()}
@@ -152,7 +171,9 @@ def candidates():
                 and vol <= mc * CFG.get("max_vol_mcap_ratio", 15)                                           # skip wash-trading volume
                 and tx.get("buys", 0) >= CFG.get("min_buy_ratio", 1.3) * max(tx.get("sells", 0), 1)    # clear buy pressure
                 and tx.get("buys", 0) + tx.get("sells", 0) >= 200):          # real activity
-            yield vol, q, mc, liq, age
+            sc = quality_score(q, mc, liq, vol)
+            if sc < CFG.get("min_score", 0): continue
+            yield sc, q, mc, liq, age
 
 def safety_gt(ca):
     """Contract safety gate via GeckoTerminal token info. Returns (ok, reason, summary). Fails closed when data is missing."""
@@ -264,13 +285,15 @@ def call_out():
     rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date()) and not x["notes"].startswith("EARLY")]
     if len(today) >= CFG["max_calls_per_day"]: return
     best = None; safe = ""
-    for c in sorted(candidates(), key=lambda c: -c[0])[:4]:
+    for c in sorted(candidates(), key=lambda c: -c[0])[:5]:
         ok, why, summ = safety(c[1]["baseToken"]["address"])
+        log_candidate(c[1]["baseToken"]["address"], c[1], c[4] * 60, None, "pass" if ok else "blocked", "" if ok else why, tier="normal", qscore=c[0])
         if ok: best, safe = c, summ; break
         print(f"[SKIP] {c[1]['baseToken']['symbol']}: {why}")
     if not best: return
     _, q, mc, liq, age = best; sym = q["baseToken"]["symbol"]; ca = q["baseToken"]["address"]
     publish_call(q, mc, liq, call_text(sym, mc, liq, age, q, safe, ca))
+    if any(x["contract"] == ca for x in rows()): mark_candidate(ca, "posted")
 
 # ---------- EARLY tier: 15-60 min old tokens, clearly labelled high risk ----------
 E = dict(min_age_min=CFG.get("early_min_age_min", 5), max_age_min=CFG.get("early_max_age_min", 45), min_mcap=CFG.get("early_min_mcap", 10000),
@@ -292,7 +315,7 @@ def gt_get(url, tries=4):
             if getattr(e, "code", None) == 429 and i < tries - 1: time.sleep(8 * (i + 1)); continue
             raise
 
-CAND_FIELDS = "ca,symbol,eval_utc,age_m,mcap,liq,holders,score,flags,buys,sells,m5,h1,run_pct,decision,reason,price0,m1h,m3h,m6h".split(",")
+CAND_FIELDS = "ca,symbol,eval_utc,age_m,mcap,liq,holders,score,flags,buys,sells,m5,h1,run_pct,decision,reason,price0,m1h,m3h,m6h,tier,qscore".split(",")
 
 def cand_rows():
     f = f"{STATE}/candidates.csv"
@@ -302,7 +325,7 @@ def cand_save(rs):
     os.makedirs(STATE, exist_ok=True)
     w = csv.DictWriter(open(f"{STATE}/candidates.csv", "w", newline=""), CAND_FIELDS, extrasaction="ignore"); w.writeheader(); w.writerows(rs)
 
-def log_candidate(ca, q, age_m, run, decision, reason):
+def log_candidate(ca, q, age_m, run, decision, reason, tier="early", qscore=""):
     """Record a coin the first time it reaches the safety stage, with the features we may want to learn from. Outcomes are filled in later."""
     rs = cand_rows()
     if any(x["ca"] == ca for x in rs): return
@@ -311,7 +334,7 @@ def log_candidate(ca, q, age_m, run, decision, reason):
                    liq=round((q.get("liquidity") or {}).get("usd", 0)), holders=d.get("totalHolders", ""), score=d.get("score_normalised", ""),
                    flags="|".join(str(x.get("name")) for x in (d.get("risks") or []) if x.get("level") in ("danger", "warn")),
                    buys=tx.get("buys", ""), sells=tx.get("sells", ""), m5=pc.get("m5", ""), h1=pc.get("h1", ""), run_pct=round(run * 100) if run is not None else "",
-                   decision=decision, reason=reason, price0=q.get("priceUsd", ""), m1h="", m3h="", m6h=""))
+                   decision=decision, reason=reason, price0=q.get("priceUsd", ""), m1h="", m3h="", m6h="", tier=tier, qscore=qscore))
     cand_save(rs)
 
 def mark_candidate(ca, decision):
