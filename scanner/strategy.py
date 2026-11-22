@@ -95,6 +95,7 @@ class Signal:
     pip: float = 1.0
     decimals: int = 0
     n_tp: int = 4
+    be_after: int = 1
 
 
 def make_signal(name, side, zone_lo, zone_hi, price, time, touches, reasons, sym):
@@ -105,17 +106,20 @@ def make_signal(name, side, zone_lo, zone_hi, price, time, touches, reasons, sym
     if side == "SELL" and not (lv["tps"][0] < price < lv["sl"]): return None
     return Signal(name, side, price, lv["sl"], lv["tps"][0], min(5, touches), time, reasons, tps=lv["tps"],
                   zone_lo=lv["lo"], zone_hi=lv["hi"], ref=lv["ref"], style=sym.style, label=sym.label or name,
-                  pip=sym.pip, decimals=sym.decimals, n_tp=len(lv["tps"]))
+                  pip=sym.pip, decimals=sym.decimals, n_tp=len(lv["tps"]), be_after=sym.be_after)
 
 
-def evaluate(name, df15, df1h, min_touches=3, min_rr=None, i=-2, ltf_min=15, htf_min=60, sym=None):
+def evaluate(name, df15, df1h, min_touches=None, min_rr=None, i=-2, ltf_min=15, htf_min=60, sym=None):
     """Evaluate bar i of df15 (default: last closed bar; the forming bar is -1). min_rr is unused (levels are fixed)."""
     if sym is None:
         from .config import get_symbol
         sym = get_symbol(name) if name in ("GOLD", "BTC", "ETH") else get_symbol("BTC")
+    min_touches = sym.touches if min_touches is None else min_touches
     n = len(df15) + i + 1 if i < 0 else i + 1
     d = df15.iloc[:n]
     if len(d) < 120 or len(df1h) < 80:
+        return None
+    if sym.session and not (sym.session[0] <= d.index[-1].hour < sym.session[1]):
         return None
     close_t = d.index[-1] + pd.Timedelta(minutes=ltf_min)
     h = df1h[df1h.index + pd.Timedelta(minutes=htf_min) <= close_t]
@@ -125,6 +129,10 @@ def evaluate(name, df15, df1h, min_touches=3, min_rr=None, i=-2, ltf_min=15, htf
     t15, t1h = trend(d), trend(h)
     if t15 == 0 or t15 != t1h:
         return None
+    if sym.need_4h:
+        h4 = h.resample("4h").agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna().iloc[:-1]
+        if trend(h4) != t15:
+            return None
 
     bar = d.iloc[-1]
     zones = find_zones(d, h)
@@ -136,7 +144,7 @@ def evaluate(name, df15, df1h, min_touches=3, min_rr=None, i=-2, ltf_min=15, htf
         if not sup: return None
         z = max(sup, key=lambda z: z.mid)
         lower_wick = (min(bar.open, bar.close) - bar.low) / rng
-        if bar.low <= z.hi and bar.close > z.hi and bar.close > bar.open and lower_wick >= 0.25:
+        if bar.low <= z.hi and bar.close > z.hi and bar.close > bar.open and lower_wick >= sym.wick:
             why.append(f"bounce off support {z.lo:,.2f}-{z.hi:,.2f} ({z.touches} touches)")
             return make_signal(name, "BUY", z.lo, z.hi, bar.close, d.index[-1], z.touches, why, sym)
     else:  # resistance rejection
@@ -144,7 +152,7 @@ def evaluate(name, df15, df1h, min_touches=3, min_rr=None, i=-2, ltf_min=15, htf
         if not res: return None
         z = min(res, key=lambda z: z.mid)
         upper_wick = (bar.high - max(bar.open, bar.close)) / rng
-        if bar.high >= z.lo and bar.close < z.lo and bar.close < bar.open and upper_wick >= 0.25:
+        if bar.high >= z.lo and bar.close < z.lo and bar.close < bar.open and upper_wick >= sym.wick:
             why.append(f"rejection at resistance {z.lo:,.2f}-{z.hi:,.2f} ({z.touches} touches)")
             return make_signal(name, "SELL", z.lo, z.hi, bar.close, d.index[-1], z.touches, why, sym)
     return None

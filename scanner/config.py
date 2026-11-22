@@ -20,12 +20,17 @@ class Symbol:
     step: float = 0.0038      # gap between TPs
     zone_cap: float = 0.0095  # max entry-zone width
     run: float = 0.0039       # profit that triggers the "trade active and running" update
+    be_after: int = 1         # move stop to entry after this many TPs (None = never)
+    touches: int = 3          # min pivot touches for a level to count
+    wick: float = 0.25        # min rejection wick as a share of the candle range
+    need_4h: bool = False     # also require the 4h trend to agree
+    session: tuple = None     # (start_hour, end_hour) UTC window for new signals, None = any time
 
 
 SYMBOLS = [
     # GOLD: 50-pip layout (pip = 0.10): SL 5.0 beyond the zone, TP1-TP3 5.0 apart, TP4 = Hold
     Symbol("GOLD", mt5="XAUUSD", yahoo="GC=F", label="GOLD", style="gold", pip=0.10, decimals=0,
-           pct=False, sl=5.0, tp1=5.0, step=5.0, zone_cap=10.0, run=2.5),
+           pct=False, sl=5.0, tp1=5.0, step=5.0, zone_cap=10.0, run=2.5, be_after=2),
     # BTC / ETH: wider levels as a share of price (scaled from the Grand Pips BTC example)
     Symbol("BTC", mt5="BTCUSD", binance="BTCUSDT", kraken="XBTUSD", label="BTCUSD", style="btc", pip=10.0, decimals=0),
     Symbol("ETH", mt5="ETHUSD", binance="ETHUSDT", kraken="ETHUSD", label="ETHUSD", style="btc", pip=1.0, decimals=1),
@@ -39,6 +44,7 @@ def get_symbol(name):
 @dataclass
 class Settings:
     timeframe: str = "15m"         # entry timeframe (trend checked on 15m + 1h)
+    track_tf: str = "5m"           # candle size used to follow open trades
     htf: str = "1h"                # higher timeframe: trend + main S/R levels
     poll_seconds: int = 60
     min_touches: int = 3           # pivot touches needed for a level to count as S/R

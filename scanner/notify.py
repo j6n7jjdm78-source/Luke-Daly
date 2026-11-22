@@ -8,7 +8,12 @@ def _p(x, d):
     return f"{x:,.{d}f}".replace(",", "") if d else f"{x:.0f}"
 
 
-def format_signal(sig, number=None):
+def format_signal(sig, number=None, test=False):
+    banner = "🧪 TEST - NOT A LIVE SIGNAL\n\n" if test else ""
+    return banner + _format(sig, number)
+
+
+def _format(sig, number):
     d = sig.decimals
     if sig.style == "gold":
         word = "Buy" if sig.side == "BUY" else "Sell"
@@ -47,8 +52,8 @@ def _post(settings, text, reply_to=None):
         return None
 
 
-def send(sig, settings, number=None):
-    mid = _post(settings, format_signal(sig, number))
+def send(sig, settings, number=None, test=False):
+    mid = _post(settings, format_signal(sig, number, test))
     new = not os.path.exists(settings.log_file)
     with open(settings.log_file, "a", newline="") as f:
         w = csv.writer(f)

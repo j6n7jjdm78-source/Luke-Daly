@@ -12,8 +12,8 @@ MAX_AGE = pd.Timedelta(days=5)
 def new_trade(sig, message_id, number=None):
     return dict(name=sig.symbol, side=sig.side, bar_time=sig.time.isoformat(), entry=sig.price, ref=sig.ref,
                 sl=sig.sl, tps=list(sig.tps), pip=sig.pip, run=None, hit=0, be=False, running_sent=False,
-                closed=False, message_id=message_id, number=number, n_tp=sig.n_tp, done_until=sig.time.isoformat(),
-                style=sig.style)
+                closed=False, message_id=message_id, number=number, n_tp=sig.n_tp, be_after=sig.be_after,
+                done_until=(sig.time + pd.Timedelta(minutes=15) - pd.Timedelta(seconds=1)).isoformat(), style=sig.style)
 
 
 def _pips(t, price):
@@ -29,7 +29,7 @@ def resolve(t, df, run_thr, tf_min=15):
         stop = t["entry"] if t["be"] else t["sl"]
         if (c["low"] <= stop) if buy else (c["high"] >= stop):
             if t["be"]:
-                out.append("STOPPED AT BE ⚖️\nTrade closed at breakeven after TP1.")
+                out.append(f"STOPPED AT BE ⚖️\nTrade closed at breakeven after TP{t['hit']}.")
             else:
                 out.append(f"SL HIT ❌ -{abs(_pips(t, t['sl']))}PIPS")
             t["closed"] = True
@@ -40,7 +40,8 @@ def resolve(t, df, run_thr, tf_min=15):
             k = t["hit"]
             out.append(f"HIT TP{k + 1} ✅ +{_pips(t, t['tps'][k])}PIPS\n\n{notify.FOOTER}")
             t["hit"] += 1
-            t["be"] = True
+            if t.get("be_after") and t["hit"] >= t["be_after"]:
+                t["be"] = True
         if t["hit"] >= len(t["tps"]):
             out.append("HIT ALL TP ✅")
             t["closed"] = True
@@ -64,7 +65,7 @@ def run(state, src, settings):
             continue
         try:
             sym = get_symbol(t["name"])
-            df = src.candles(sym, settings.timeframe).iloc[:-1]   # drop the forming candle
+            df = src.candles(sym, settings.track_tf).iloc[:-1]   # fine candles, drop the forming one
         except Exception as e:
             print(f"[warn] tracker {t['name']}: {e}")
             continue

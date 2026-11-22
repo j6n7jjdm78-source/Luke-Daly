@@ -60,27 +60,45 @@ def check_chat(env):
     print("Chats seen:", chats or "none yet - add the bot to the group, send a message there, run again")
 
 
+def script(sig, steps, thr):
+    """Fake candles that walk a signal through steps: run, tp1..tp4, back (retrace to entry), sl."""
+    buy, p, ref = sig.side == "BUY", sig.price, sig.ref
+    mid = (p + sig.tps[0]) / 2          # stays between entry and TP1 so it never touches the entry stop
+    rows = []
+    for st in steps:
+        if st == "run":   hi, lo = (ref + thr * 1.02, ref) if buy else (ref, ref - thr * 1.02)
+        elif st == "back": hi, lo = (p, p - 0.0001) if buy else (p + 0.0001, p)
+        elif st == "sl":  hi, lo = (p, sig.sl - 0.0001) if buy else (sig.sl + 0.0001, p)
+        else:
+            tp = sig.tps[int(st[2:]) - 1]
+            hi, lo = (tp, mid) if buy else (mid, tp)
+        rows.append(dict(open=p, close=p, high=hi, low=lo))
+    return rows
+
+
 def run_test(s):
-    """Post one fake gold BUY and one fake BTC SELL, then fake running / TP / BE updates as threaded replies."""
+    """Post fake setups covering every path (all TPs, breakeven stop, SL hit) as threaded replies, for gold and BTC."""
     now = pd.Timestamp.now(tz="UTC").floor("15min")
-    demos = [("GOLD", "BUY", 3567.0, 3573.0, 3574.0), ("BTC", "SELL", 56140.0, 56641.0, 56100.0)]
-    for name, side, lo, hi, price in demos:
+    cases = [  # name, side, zone lo, zone hi, entry price, steps
+        ("GOLD", "BUY", 3567.0, 3573.0, 3574.0, ["run", "tp1", "tp2", "tp3"]),
+        ("GOLD", "SELL", 3590.0, 3596.0, 3589.0, ["run", "tp1", "tp2", "back"]),
+        ("GOLD", "BUY", 3567.0, 3573.0, 3574.0, ["run", "sl"]),
+        ("BTC", "SELL", 56140.0, 56641.0, 56100.0, ["run", "tp1", "tp2", "tp3", "tp4"]),
+        ("BTC", "BUY", 56140.0, 56641.0, 56700.0, ["run", "tp1", "back"]),
+    ]
+    st = {"counter": {}}
+    for k, (name, side, lo, hi, price, steps) in enumerate(cases):
         sym = get_symbol(name)
         sig = make_signal(name, side, lo, hi, price, now, 3, ["test"], sym)
-        mid = notify.send(sig, s, 1 if sym.style == "gold" else None)
-        t = tracker.new_trade(sig, mid, 1)
-        buy = side == "BUY"
+        number = next_number(st, name) if sym.style == "gold" else None
+        mid = notify.send(sig, s, number, test=True)
+        t = tracker.new_trade(sig, mid, number)
         thr = sym.run * (price if sym.pct else 1)
-        # synthetic candles: reach the "running" level, then TP1, then (gold) TP3 / (btc) fall back to entry
-        c1 = dict(high=sig.ref + thr if buy else sig.ref, low=sig.ref if buy else sig.ref - thr, open=price, close=price)
-        c2 = dict(high=sig.tps[0] if buy else price, low=price if buy else sig.tps[0], open=price, close=price)
-        c3 = dict(high=sig.tps[-1], low=price + 0.5, open=price, close=price)
-        if not buy:   # BTC demo ends with a breakeven stop instead of all TPs
-            c3 = dict(high=price + 1, low=sig.tps[0] + 1, open=price, close=price)
-        df = pd.DataFrame([c1, c2, c3], index=[now + pd.Timedelta(minutes=15 * (k + 1)) for k in range(3)])
+        df = pd.DataFrame(script(sig, steps, thr), index=[now + pd.Timedelta(minutes=15 * (j + 1)) for j in range(len(steps))])
         for text in tracker.resolve(t, df, thr):
-            time.sleep(1)
+            time.sleep(1.2)
             notify.reply(text, mid, s)
+        time.sleep(2)
 
 
 def main():
@@ -88,6 +106,7 @@ def main():
     ap.add_argument("--once", action="store_true", help="scan once and exit")
     ap.add_argument("--test", action="store_true", help="send sample signals and updates to Telegram")
     ap.add_argument("--chat-id", action="store_true", help="check the bot token and list chats it can see")
+    ap.add_argument("--track", action="store_true", help="only follow open trades (no new signals)")
     ap.add_argument("--tf", default=None)
     ap.add_argument("--source", default=None)
     ap.add_argument("--min-touches", type=int, default=None)
@@ -105,6 +124,10 @@ def main():
     src = make_source(s, env)
     print(f"Scanning {[x.name for x in s.symbols]} on {s.timeframe} via {src.name}")
     st = load_state()
+    if a.track:
+        tracker.run(st, src, s)
+        save_state(st)
+        return print(f"tracking {len(st['open'])} open trade(s)")
     bar = TF_MINUTES[s.timeframe] * 60
     while True:
         tracker.run(st, src, s)
@@ -112,7 +135,7 @@ def main():
         for sym in s.symbols:
             try:
                 df, htf = src.candles(sym, s.timeframe), src.candles(sym, s.htf)
-                sig = evaluate(sym.name, df, htf, s.min_touches, ltf_min=TF_MINUTES[s.timeframe],
+                sig = evaluate(sym.name, df, htf, a.min_touches, ltf_min=TF_MINUTES[s.timeframe],
                                htf_min=TF_MINUTES[s.htf], sym=sym)
             except Exception as e:
                 print(f"[warn] {sym.name}: {e}")
