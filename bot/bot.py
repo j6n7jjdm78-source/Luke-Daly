@@ -2,7 +2,7 @@
 Env: X_CLIENT_ID, X_CLIENT_SECRET. Needs tokens.json from auth.py.
 Create a file named STOP in repo root to halt all posting."""
 import os, sys, csv, json, time, base64, datetime as dt, statistics as st
-import urllib.parse as u, urllib.request as r
+import urllib.parse as u, urllib.request as r, urllib.error
 import cliperz_keys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CFG = json.load(open(f"{ROOT}/bot/config.json"))
@@ -16,7 +16,12 @@ STATE = f"{ROOT}/state-dry" if DRY else f"{ROOT}/state"
 
 def http(url, data=None, headers=None, method=None):
     req = r.Request(url, data, {"User-Agent": "Mozilla/5.0 (compatible; cliperz-bot/1.0)", "Accept": "application/json", **(headers or {})}, method=method)
-    return json.load(r.urlopen(req, timeout=20))
+    for attempt in range(3):   # retry brief connection drops (HTTP errors such as 429 are handled by the callers)
+        try: return json.load(r.urlopen(req, timeout=20))
+        except urllib.error.HTTPError: raise
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+            if attempt == 2: raise
+            time.sleep(2 * (attempt + 1))
 
 def token():
     t = json.load(open(TOK))
@@ -444,4 +449,6 @@ def daily_recap(hour=21):
 
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
-    track(); call_out(); early_call_out(); scoreboard(); daily_recap(); daily_lesson()
+    for stage in (track, call_out, early_call_out, scoreboard, daily_recap, daily_lesson):   # one failing stage must not skip the rest
+        try: stage()
+        except Exception as e: print(f"[WARN] {stage.__name__} failed this cycle: {type(e).__name__}: {str(e)[:100]}")
