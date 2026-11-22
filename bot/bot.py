@@ -221,11 +221,10 @@ def rugcheck(ca):
             if getattr(e, "code", None) in (429, 500, 502, 503) and i < 2: time.sleep(4 * (i + 1)); continue
             return None
 
-def safety(ca):
-    """Contract safety gate. Uses RugCheck (authorities, holders, risk flags); falls back to GeckoTerminal data if RugCheck is
-    unreachable. Returns (ok, reason, summary). Fails closed whenever it cannot verify."""
+def safety_rc(ca):
+    """RugCheck verdict: (ok, reason, summary), or None when RugCheck has no report for the token."""
     d = rugcheck(ca)
-    if not d or "risks" not in d: return safety_gt(ca)
+    if not d or "risks" not in d: return None
     if d.get("rugged"): return False, "RugCheck marks it rugged", ""
     if d.get("mintAuthority"): return False, "mint authority is ACTIVE (more supply can be created)", ""
     if d.get("freezeAuthority"): return False, "freeze authority is ACTIVE", ""
@@ -238,6 +237,11 @@ def safety(ca):
     tf = d.get("transferFee") or {}
     if float(tf.get("pct", 0) or 0) > 5: return False, f"transfer fee {tf.get('pct')}%", ""
     return True, "ok", f"mint+freeze revoked | {holders} holders | RugCheck: no risks"
+
+def safety(ca):
+    """Contract safety gate: RugCheck first, GeckoTerminal data as a fallback. Fails closed whenever it cannot verify."""
+    v = safety_rc(ca)
+    return v if v is not None else safety_gt(ca)
 
 def call_out():
     rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date()) and not x["notes"].startswith("EARLY")]
@@ -252,26 +256,13 @@ def call_out():
     publish_call(q, mc, liq, call_text(sym, mc, liq, age, q, safe, ca))
 
 # ---------- EARLY tier: 15-60 min old tokens, clearly labelled high risk ----------
-E = dict(min_age_min=15, max_age_min=60, min_mcap=10000, max_mcap=60000, min_liq=8000, buy_ratio=2.0, min_trades=150, max_per_day=2)
+E = dict(min_age_min=12, max_age_min=60, min_mcap=10000, max_mcap=60000, min_liq=8000, buy_ratio=2.0, min_trades=150, max_per_day=2)
 
 def early_safety(ca):
-    """Needs mint+freeze revoked (required). Holder data is often not available yet at this age; if present it must look sane."""
-    info = None
-    for attempt in range(3):
-        try: info = http(f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{ca}/info")["data"]["attributes"]; break
-        except Exception: time.sleep(3 * (attempt + 1))
-    if not info: return False, "no safety data", ""
-    if info.get("mint_authority") != "no": return False, f"mint authority not confirmed revoked ({info.get('mint_authority')})", ""
-    if info.get("freeze_authority") != "no": return False, f"freeze authority not confirmed revoked ({info.get('freeze_authority')})", ""
-    if str(info.get("is_honeypot")).lower() == "yes": return False, "honeypot flag", ""
-    h = info.get("holders") or {}
-    try: cnt = int(h.get("count") or 0); top10 = float((h.get("distribution_percentage") or {}).get("top_10") or 0)
-    except Exception: cnt, top10 = 0, 0
-    if cnt:
-        if cnt < 50: return False, f"only {cnt} holders", ""
-        if top10 > 60: return False, f"top 10 holders own {top10:.0f}%", ""
-        return True, "ok", f"mint+freeze revoked | {cnt} holders | top10 {top10:.0f}%"
-    return True, "ok", "mint+freeze revoked | holder data not available yet"
+    """New-pair tier: RugCheck must have a report and clear the same gate as normal calls (100+ holders, no danger flags,
+    mint and freeze revoked). No weaker fallback for brand-new tokens."""
+    v = safety_rc(ca)
+    return v if v is not None else (False, "no RugCheck report yet", "")
 
 def gt_get(url, tries=4):
     """GeckoTerminal GET that waits and retries when rate limited (HTTP 429)."""
@@ -327,9 +318,15 @@ def early_call_out():
         ok, why, safe = early_safety(ca)
         if not ok: print(f"[SKIP early] {sym}: {why}"); continue
         tx = q["txns"]["h1"]
-        publish_call(q, mc, liq, (f"EARLY / HIGH RISK\n${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age_m:.0f}m\n"
-            f"Why: {tx['buys']} buys vs {tx['sells']} sells, price {q['priceChange'].get('m5', 0):+.0f}% last 5m\n"
-            f"Safety: {safe}. Very new, most of these fail.\nCA: {ca}"), tier="EARLY")
+        cta = CFG["cta_text"].format(link=CFG["community_link"]) if CFG.get("cta_in_post") and CFG.get("community_link") else ""
+        m5 = q["priceChange"].get("m5", 0)
+        for why in (f"{tx['buys']} buys vs {tx['sells']} sells, 5m {m5:+.0f}%", f"buys {tx['buys']}/{tx['sells']} sells"):
+            for sf in (f"Safety: {safe}. Very new, most fail.", f"Safety: {safe.replace(' | ', ', ')}. Can rug."):
+                text = f"EARLY / HIGH RISK\n${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age_m:.0f}m\nWhy: {why}\n{sf}\nCA: {ca}" + (f"\n{cta}" if cta else "")
+                if xlen(text) <= 274: break
+            else: continue
+            break
+        publish_call(q, mc, liq, text, tier="EARLY")
         return
 
 def peak_since(q, called_iso):
