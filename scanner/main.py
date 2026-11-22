@@ -79,19 +79,17 @@ def script(sig, steps, thr):
 def run_test(s):
     """Post fake setups covering every path (all TPs, breakeven stop, SL hit) as threaded replies, for gold and BTC."""
     now = pd.Timestamp.now(tz="UTC").floor("15min")
-    cases = [  # name, side, zone lo, zone hi, entry price, steps
+    cases = [  # name, side, zone lo, zone hi, entry price, steps (live config: stop moves to entry after TP1)
         ("GOLD", "BUY", 3567.0, 3573.0, 3574.0, ["run", "tp1", "tp2", "tp3"]),
-        ("GOLD", "SELL", 3590.0, 3596.0, 3589.0, ["run", "tp1", "tp2", "back"], 2),   # demo of a BE-after-TP2 stop
+        ("GOLD", "SELL", 3590.0, 3596.0, 3589.0, ["run", "tp1", "back"]),
         ("GOLD", "BUY", 3567.0, 3573.0, 3574.0, ["run", "sl"]),
         ("BTC", "SELL", 56140.0, 56641.0, 56100.0, ["run", "tp1", "tp2", "tp3", "tp4"]),
-        ("BTC", "BUY", 56140.0, 56641.0, 56700.0, ["run", "tp1", "back"], 1),         # demo of a BE-after-TP1 stop
+        ("BTC", "BUY", 56140.0, 56641.0, 56700.0, ["run", "tp1", "back"]),
+        ("BTC", "SELL", 56140.0, 56641.0, 56100.0, ["run", "sl"]),
     ]
     st = {"counter": {}}
-    from dataclasses import replace
-    for k, (name, side, lo, hi, price, steps, *be) in enumerate(cases):
+    for k, (name, side, lo, hi, price, steps) in enumerate(cases):
         sym = get_symbol(name)
-        if be:
-            sym = replace(sym, be_after=be[0])
         sig = make_signal(name, side, lo, hi, price, now, 3, ["test"], sym)
         number = next_number(st, name) if sym.style == "gold" else None
         mid = notify.send(sig, s, number, test=True)

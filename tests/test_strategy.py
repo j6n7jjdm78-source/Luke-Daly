@@ -141,10 +141,11 @@ def test_demo_suite_sequences_cover_every_path():
         return [e.split("\n")[0].split(" +")[0] for e in tracker.resolve(t, df, thr)]
 
     assert run("GOLD", "BUY", 3567, 3573, 3574, ["run", "tp1", "tp2", "tp3"])[-1] == "HIT ALL TP ✅"
-    assert run("GOLD", "SELL", 3590, 3596, 3589, ["run", "tp1", "tp2", "back"], be=2)[-1] == "STOPPED AT BE ⚖️"
+    assert run("GOLD", "SELL", 3590, 3596, 3589, ["run", "tp1", "back"])[-1] == "STOPPED AT BE ⚖️"
     assert run("GOLD", "BUY", 3567, 3573, 3574, ["run", "sl"])[-1].startswith("SL HIT")
     assert run("BTC", "SELL", 56140, 56641, 56100, ["run", "tp1", "tp2", "tp3", "tp4"])[-2:] == ["HIT TP4 ✅", "HIT ALL TP ✅"]
-    assert run("BTC", "BUY", 56140, 56641, 56700, ["run", "tp1", "back"], be=1)[-1] == "STOPPED AT BE ⚖️"
+    assert run("BTC", "BUY", 56140, 56641, 56700, ["run", "tp1", "back"])[-1] == "STOPPED AT BE ⚖️"
+    assert run("BTC", "SELL", 56140, 56641, 56100, ["run", "sl"])[-1].startswith("SL HIT")
 
 
 def test_gold_filters_session_and_4h():
@@ -171,7 +172,16 @@ def test_message_formats_match_references():
     assert "DIRECTION: SELL BTCUSD" in b and "ENTRY PRICE: 56140 - 56641" in b and "❌ Stop Loss:" in b and "TP4:" in b
 
 
-def test_live_config_gold_and_btc_run_to_all_tps_without_breakeven():
+def test_live_config_gold_btc_eth_move_stop_to_entry_after_tp1():
     from scanner.config import get_symbol
-    g, b, e = get_symbol("GOLD"), get_symbol("BTC"), get_symbol("ETH")
-    assert g.be_after is None and g.need_4h and b.be_after is None and e.be_after == 1
+    assert all(get_symbol(n).be_after == 1 for n in ("GOLD", "BTC", "ETH")) and get_symbol("GOLD").need_4h
+
+
+def test_tp1_message_announces_breakeven_only_when_it_applies():
+    from scanner import tracker
+    t = _trade(); t["be_after"] = 1
+    ev = tracker.resolve(t, _candles([(3578.5, 3572)]), run_thr=2.5)
+    assert any("Stop moved to entry (BE)" in e for e in ev if e.startswith("HIT TP1"))
+    t = _trade(); t["be_after"] = None
+    ev = tracker.resolve(t, _candles([(3578.5, 3572)]), run_thr=2.5)
+    assert not any("Stop moved to entry" in e for e in ev)

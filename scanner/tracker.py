@@ -38,10 +38,12 @@ def resolve(t, df, run_thr, tf_min=15):
         fav = c["high"] if buy else c["low"]
         while t["hit"] < len(t["tps"]) and ((fav >= t["tps"][t["hit"]]) if buy else (fav <= t["tps"][t["hit"]])):
             k = t["hit"]
-            out.append(f"HIT TP{k + 1} ✅ +{_pips(t, t['tps'][k])}PIPS\n\n{notify.FOOTER}")
             t["hit"] += 1
-            if t.get("be_after") and t["hit"] >= t["be_after"]:
+            msg = f"HIT TP{k + 1} ✅ +{_pips(t, t['tps'][k])}PIPS"
+            if t.get("be_after") and t["hit"] >= t["be_after"] and not t["be"]:
                 t["be"] = True
+                msg += "\nStop moved to entry (BE) ⚖️"
+            out.append(f"{msg}\n\n{notify.FOOTER}")
         if t["hit"] >= len(t["tps"]):
             out.append("HIT ALL TP ✅")
             t["closed"] = True
