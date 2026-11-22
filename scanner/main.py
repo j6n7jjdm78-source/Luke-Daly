@@ -30,7 +30,7 @@ def main():
     if a.tf: s.timeframe = a.tf
     if a.source: s.source = a.source
     if a.min_touches: s.min_touches = a.min_touches
-    s.telegram_token, s.telegram_chat = env.get("TELEGRAM_BOT_TOKEN", ""), env.get("TELEGRAM_CHAT_ID", "")
+    s.telegram_token, s.telegram_chat = env.get("TELEGRAM_BOT_TOKEN", "").strip(), env.get("TELEGRAM_CHAT_ID", "").strip()
     if a.chat_id:
         import requests
         tok = env.get("TELEGRAM_BOT_TOKEN", "").strip()
