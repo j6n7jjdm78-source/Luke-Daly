@@ -24,13 +24,17 @@ def http(url, data=None, headers=None, method=None):
             time.sleep(2 * (attempt + 1))
 
 def token():
+    """Current X access token. The refresh time is stored INSIDE the login file ("obtained_at") so it survives being copied to another machine
+    (file timestamps do not); the file timestamp is only a fallback for older files."""
     t = json.load(open(TOK))
-    if time.time() - os.path.getmtime(TOK) > t.get("expires_in", 7200) - 300:  # refresh
+    obtained = t.get("obtained_at") or os.path.getmtime(TOK)
+    if time.time() - obtained > t.get("expires_in", 7200) - 300:  # refresh
         cid, sec = cliperz_keys.load()
         a = base64.b64encode(f"{cid}:{sec}".encode()).decode()
         t = http("https://api.x.com/2/oauth2/token", u.urlencode(dict(grant_type="refresh_token",
                  refresh_token=t["refresh_token"], client_id=cid)).encode(),
                  {"Authorization": "Basic " + a, "Content-Type": "application/x-www-form-urlencoded"})
+        t["obtained_at"] = time.time()
         json.dump(t, open(TOK, "w"))
     return t["access_token"]
 

@@ -10,10 +10,10 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check = only verify the secrets, run = run the bot"
+        description: "check = verify the secrets, test = verify the login + X + Telegram (posts nothing public), run = run the bot"
         default: "check"
         type: choice
-        options: [check, run]
+        options: [check, test, run]
 permissions:
   contents: write
 concurrency:
@@ -46,17 +46,17 @@ jobs:
         with:
           python-version: "3.12"
       - uses: actions/setup-node@v4
-        if: ${{ github.event.inputs.mode != 'check' }}
+        if: ${{ github.event.inputs.mode != 'check' && github.event.inputs.mode != 'test' }}
         with:
           node-version: "20"
       - name: Cache browser for the card pictures
-        if: ${{ github.event.inputs.mode != 'check' }}
+        if: ${{ github.event.inputs.mode != 'check' && github.event.inputs.mode != 'test' }}
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-v1
       - name: Install card renderer and fonts
-        if: ${{ github.event.inputs.mode != 'check' }}
+        if: ${{ github.event.inputs.mode != 'check' && github.event.inputs.mode != 'test' }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq fonts-liberation fonts-dejavu-core fonts-noto-color-emoji
@@ -69,7 +69,7 @@ jobs:
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:TOKEN_KEY -in state/tokens.enc -out ~/.config/cliperz-bot/tokens.json
           chmod 600 ~/.config/cliperz-bot/tokens.json
       - name: Run the bot about once a minute for ~28 minutes
-        if: ${{ github.event.inputs.mode != 'check' }}
+        if: ${{ github.event.inputs.mode != 'check' && github.event.inputs.mode != 'test' }}
         run: |
           END=$((SECONDS + 1680))
           while [ $SECONDS -lt $END ]; do
@@ -81,6 +81,18 @@ jobs:
             [ "$BEFORE" != "$AFTER" ] && bash deploy/save_state.sh   # new call, milestone, or refreshed login: save right away
             USED=$((SECONDS - T0)); [ $USED -lt 60 ] && sleep $((60 - USED))
           done
+      - name: Test the login, X and Telegram (test mode only; posts nothing public)
+        if: ${{ github.event.inputs.mode == 'test' }}
+        run: |
+          python3 - <<'PY'
+          import sys; sys.path.insert(0, "bot")
+          import bot
+          me = bot.http("https://api.x.com/2/users/me", headers={"Authorization": "Bearer " + bot.token()})["data"]
+          print("X login OK, account:", me["username"])
+          bot.DRY = False
+          bot.owner_msg("✅ GitHub test: the cloud copy can log in to X and message you. Nothing public was posted.")
+          print("Telegram DM sent (check your private chat with the bot)")
+          PY
       - name: Save X login (re-encrypted) and bot state
         if: ${{ always() && github.event.inputs.mode != 'check' }}
         run: bash deploy/save_state.sh
