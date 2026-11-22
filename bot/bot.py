@@ -602,8 +602,14 @@ def daily_growth(hour=16):
     Nothing is ever posted or replied automatically."""
     if now.hour < hour or DRY or not _once_today("growth"): return
     try:
-        me = http("https://api.x.com/2/users/me?user.fields=public_metrics", headers={"Authorization": "Bearer " + token()})["data"]["public_metrics"]
+        auth = {"Authorization": "Bearer " + token()}
+        u = http("https://api.x.com/2/users/me?user.fields=public_metrics", headers=auth)["data"]; me = u["public_metrics"]
         head = f"📈 Growth check: {me.get('followers_count')} followers, {me.get('tweet_count')} posts."
+        try:   # views and likes on the last 20 posts (best effort; the X plan may not return impressions)
+            tw = http(f"https://api.x.com/2/users/{u['id']}/tweets?max_results=20&tweet.fields=public_metrics", headers=auth).get("data") or []
+            views = sum(t["public_metrics"].get("impression_count", 0) for t in tw); likes = sum(t["public_metrics"].get("like_count", 0) for t in tw)
+            head += f" Last {len(tw)} posts: {views:,} views, {likes} likes."
+        except Exception: pass
     except Exception: head = "📈 Growth check (follower count unavailable)."
     drafts = []
     for sc, q, mc, liq, age in sorted(candidates(), key=lambda t: -t[0])[:12]:
