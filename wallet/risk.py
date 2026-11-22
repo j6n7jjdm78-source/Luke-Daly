@@ -57,7 +57,7 @@ class Risk:
             raise Refused(f"call {call_id} already bought")
         if not (0 < size_sol <= z["max_per_trade_sol"]):
             raise Refused(f"size {size_sol} outside per-trade limit {z['max_per_trade_sol']}")
-        if self.s["spent"] + size_sol > z["max_daily_spend_sol"]:
+        if self.s["spent"] + size_sol > z["max_daily_spend_sol"] + 1e-9:
             raise Refused("daily spend limit")
         if self.s["open"] >= z["max_open_positions"]:
             raise Refused("max open positions")
