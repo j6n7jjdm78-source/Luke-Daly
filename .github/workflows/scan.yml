@@ -8,7 +8,7 @@ on:
         description: "scan | track | test | chat-id | backtest"
         default: "test"
         type: choice
-        options: [test, chat-id, scan, track, backtest]
+        options: [test, test-btc-be-sl, chat-id, scan, track, backtest]
 concurrency: scan
 jobs:
   run:
@@ -32,6 +32,7 @@ jobs:
         run: |
           case "${{ github.event.inputs.mode || 'scan' }}" in
             test) python -m scanner.main --test ;;
+            test-btc-be-sl) python -m scanner.main --test --test-cases 5,6 ;;
             chat-id) python -m scanner.main --chat-id ;;
             backtest) python -m scanner.backtest --days 90 --sweep ;;
             track) python -m scanner.main --once --track --source public ;;

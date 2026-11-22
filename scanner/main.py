@@ -76,7 +76,7 @@ def script(sig, steps, thr):
     return rows
 
 
-def run_test(s):
+def run_test(s, only=None):
     """Post fake setups covering every path (all TPs, breakeven stop, SL hit) as threaded replies, for gold and BTC."""
     now = pd.Timestamp.now(tz="UTC").floor("15min")
     cases = [  # name, side, zone lo, zone hi, entry price, steps (live config: stop moves to entry after TP1)
@@ -88,7 +88,9 @@ def run_test(s):
         ("BTC", "SELL", 56140.0, 56641.0, 56100.0, ["run", "sl"]),
     ]
     st = {"counter": {}}
-    for k, (name, side, lo, hi, price, steps) in enumerate(cases):
+    for k, (name, side, lo, hi, price, steps) in enumerate(cases, 1):
+        if only and k not in only:
+            continue
         sym = get_symbol(name)
         sig = make_signal(name, side, lo, hi, price, now, 3, ["test"], sym)
         number = next_number(st, name) if sym.style == "gold" else None
@@ -97,9 +99,9 @@ def run_test(s):
         thr = sym.run * (price if sym.pct else 1)
         df = pd.DataFrame(script(sig, steps, thr), index=[now + pd.Timedelta(minutes=15 * (j + 1)) for j in range(len(steps))])
         for text in tracker.resolve(t, df, thr):
-            time.sleep(1.2)
+            time.sleep(3)
             notify.reply(text, mid, s)
-        time.sleep(2)
+        time.sleep(5)
 
 
 def main():
@@ -107,6 +109,7 @@ def main():
     ap.add_argument("--once", action="store_true", help="scan once and exit")
     ap.add_argument("--test", action="store_true", help="send sample signals and updates to Telegram")
     ap.add_argument("--chat-id", action="store_true", help="check the bot token and list chats it can see")
+    ap.add_argument("--test-cases", default="", help="with --test: only these demo cases, e.g. 5,6")
     ap.add_argument("--track", action="store_true", help="only follow open trades (no new signals)")
     ap.add_argument("--tf", default=None)
     ap.add_argument("--source", default=None)
@@ -121,7 +124,7 @@ def main():
     if a.chat_id:
         return check_chat(env)
     if a.test:
-        return run_test(s)
+        return run_test(s, {int(x) for x in a.test_cases.split(",") if x} or None)
     src = make_source(s, env)
     print(f"Scanning {[x.name for x in s.symbols]} on {s.timeframe} via {src.name}")
     st = load_state()

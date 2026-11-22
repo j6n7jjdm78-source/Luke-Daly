@@ -1,4 +1,4 @@
-import csv, os
+import csv, os, time
 import requests
 
 FOOTER = "Take partials. Manage Trade Risk. If hold set BE. Hold risk with Breakeven(BE)"
@@ -41,15 +41,27 @@ def _post(settings, text, reply_to=None):
     data = {"chat_id": settings.telegram_chat, "text": text}
     if reply_to:
         data["reply_to_message_id"] = reply_to
-    try:
-        r = requests.post(f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage", data=data, timeout=15)
+    for attempt in range(5):
+        try:
+            r = requests.post(f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage", data=data, timeout=15)
+        except Exception as e:
+            print(f"[warn] telegram failed: {e}")
+            return None
+        if r.status_code == 429:   # rate limited: wait as long as Telegram asks, then retry
+            wait = 5
+            try:
+                wait = int(r.json().get("parameters", {}).get("retry_after", 5))
+            except Exception:
+                pass
+            print(f"[info] telegram rate limit, waiting {wait + 1}s")
+            time.sleep(wait + 1)
+            continue
         if not r.ok:
             print(f"[warn] telegram rejected the message: {r.status_code} {r.text} (chat id used: {settings.telegram_chat!r})")
             return None
         return r.json()["result"]["message_id"]
-    except Exception as e:
-        print(f"[warn] telegram failed: {e}")
-        return None
+    print("[warn] telegram: gave up after repeated rate limits")
+    return None
 
 
 def send(sig, settings, number=None, test=False):
