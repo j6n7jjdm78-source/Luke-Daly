@@ -30,9 +30,11 @@ class Symbol:
 SYMBOLS = [
     # GOLD: 50-pip layout (pip = 0.10): SL 5.0 beyond the zone, TP1-TP3 5.0 apart, TP4 = Hold
     Symbol("GOLD", mt5="XAUUSD", yahoo="GC=F", label="GOLD", style="gold", pip=0.10, decimals=0,
-           pct=False, sl=5.0, tp1=5.0, step=5.0, zone_cap=10.0, run=2.5, be_after=2),
+           pct=False, sl=5.0, tp1=5.0, step=5.0, zone_cap=10.0, run=2.5, be_after=None,
+           need_4h=True),   # chosen by the 90-day sweep: 4h trend must agree, no breakeven (trade runs to all TPs)
     # BTC / ETH: wider levels as a share of price (scaled from the Grand Pips BTC example)
-    Symbol("BTC", mt5="BTCUSD", binance="BTCUSDT", kraken="XBTUSD", label="BTCUSD", style="btc", pip=10.0, decimals=0),
+    Symbol("BTC", mt5="BTCUSD", binance="BTCUSDT", kraken="XBTUSD", label="BTCUSD", style="btc", pip=10.0, decimals=0,
+           be_after=None),
     Symbol("ETH", mt5="ETHUSD", binance="ETHUSDT", kraken="ETHUSD", label="ETHUSD", style="btc", pip=1.0, decimals=1),
 ]
 

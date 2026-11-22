@@ -104,8 +104,7 @@ def test_tracker_sl_first_on_same_candle():
 
 def test_gold_stop_stays_until_tp2_then_moves_to_entry():
     from scanner import tracker
-    t = _trade()
-    assert t["be_after"] == 2
+    t = _trade(); t["be_after"] = 2
     ev = tracker.resolve(t, _candles([(3579, 3572), (3575, 3573.5), (3575, 3570)]), run_thr=2.5)  # TP1 then pullback to 3570
     assert [e.split("\n")[0] for e in ev] == ["HIT TP1 ✅ +80PIPS"] and not t["closed"]            # still running, no BE
     ev = tracker.resolve(t, _candles([(3584, 3574.5), (3575, 3574)], start="2026-01-01 01:00"), run_thr=2.5)
@@ -129,8 +128,12 @@ def test_demo_suite_sequences_cover_every_path():
     from scanner.strategy import make_signal
     now = pd.Timestamp("2026-01-01", tz="UTC")
 
-    def run(name, side, lo, hi, price, steps):
+    from dataclasses import replace
+
+    def run(name, side, lo, hi, price, steps, be=None):
         sym = get_symbol(name)
+        if be:
+            sym = replace(sym, be_after=be)
         sig = make_signal(name, side, lo, hi, price, now, 3, [], sym)
         t = tracker.new_trade(sig, 1, 1)
         thr = sym.run * (price if sym.pct else 1)
@@ -138,10 +141,10 @@ def test_demo_suite_sequences_cover_every_path():
         return [e.split("\n")[0].split(" +")[0] for e in tracker.resolve(t, df, thr)]
 
     assert run("GOLD", "BUY", 3567, 3573, 3574, ["run", "tp1", "tp2", "tp3"])[-1] == "HIT ALL TP ✅"
-    assert run("GOLD", "SELL", 3590, 3596, 3589, ["run", "tp1", "tp2", "back"])[-1] == "STOPPED AT BE ⚖️"
+    assert run("GOLD", "SELL", 3590, 3596, 3589, ["run", "tp1", "tp2", "back"], be=2)[-1] == "STOPPED AT BE ⚖️"
     assert run("GOLD", "BUY", 3567, 3573, 3574, ["run", "sl"])[-1].startswith("SL HIT")
     assert run("BTC", "SELL", 56140, 56641, 56100, ["run", "tp1", "tp2", "tp3", "tp4"])[-2:] == ["HIT TP4 ✅", "HIT ALL TP ✅"]
-    assert run("BTC", "BUY", 56140, 56641, 56700, ["run", "tp1", "back"])[-1] == "STOPPED AT BE ⚖️"
+    assert run("BTC", "BUY", 56140, 56641, 56700, ["run", "tp1", "back"], be=1)[-1] == "STOPPED AT BE ⚖️"
 
 
 def test_gold_filters_session_and_4h():
@@ -166,3 +169,9 @@ def test_message_formats_match_references():
     assert g.startswith("5. GOLD BUY SETUP\n\nGold Buy Zone 3573 - 3567\n\nSL : 3562\n\nTP1 : 3578\nTP2 : 3583\nTP3 : 3588\nTP4 : Hold")
     b = notify.format_signal(make_signal("BTC", "SELL", 56140, 56641, 56100, now, 3, [], get_symbol("BTC")))
     assert "DIRECTION: SELL BTCUSD" in b and "ENTRY PRICE: 56140 - 56641" in b and "❌ Stop Loss:" in b and "TP4:" in b
+
+
+def test_live_config_gold_and_btc_run_to_all_tps_without_breakeven():
+    from scanner.config import get_symbol
+    g, b, e = get_symbol("GOLD"), get_symbol("BTC"), get_symbol("ETH")
+    assert g.be_after is None and g.need_4h and b.be_after is None and e.be_after == 1
