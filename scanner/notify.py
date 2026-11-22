@@ -13,23 +13,29 @@ def format_signal(sig, number=None, test=False):
     return banner + _format(sig, number)
 
 
+def pips_from_entry(sig, price):
+    """Pips between the called price and `price`, using the symbol's pip size (always positive)."""
+    return int(round(abs(price - sig.price) / sig.pip))
+
+
 def _format(sig, number):
     d = sig.decimals
+    zone = (f"{_p(sig.zone_hi, d)} - {_p(sig.zone_lo, d)}" if sig.side == "BUY"
+            else f"{_p(sig.zone_lo, d)} - {_p(sig.zone_hi, d)}")
+    tp_line = lambda k, tp, sep: f"TP{k + 1}{sep}{_p(tp, d)} (+{pips_from_entry(sig, tp)} pips)"
+    sl_line = f"{_p(sig.sl, d)} (-{pips_from_entry(sig, sig.sl)} pips)"
     if sig.style == "gold":
         word = "Buy" if sig.side == "BUY" else "Sell"
-        zone = (f"{_p(sig.zone_hi, d)} - {_p(sig.zone_lo, d)}" if sig.side == "BUY"
-                else f"{_p(sig.zone_lo, d)} - {_p(sig.zone_hi, d)}")
         lines = [f"{number}. GOLD {sig.side} SETUP" if number else f"GOLD {sig.side} SETUP", "",
-                 f"Gold {word} Zone {zone}", "", f"SL : {_p(sig.sl, d)}", ""]
-        lines += [f"TP{k + 1} : {_p(tp, d)}" for k, tp in enumerate(sig.tps)]
+                 f"Gold {word} Zone {zone}", f"Called at : {_p(sig.price, d)}", "", f"SL : {sl_line}", ""]
+        lines += [tp_line(k, tp, " : ") for k, tp in enumerate(sig.tps)]
         lines += ["TP4 : Hold", "",
                   "🔑 Use suitable lot sizes based on your capital. Money management is key to long term success"]
         return "\n".join(lines)
-    zone = (f"{_p(sig.zone_hi, d)} - {_p(sig.zone_lo, d)}" if sig.side == "BUY"
-            else f"{_p(sig.zone_lo, d)} - {_p(sig.zone_hi, d)}")
-    lines = [f"🕯️{sig.label} SIGNAL🕯️", "", f"DIRECTION: {sig.side} {sig.label}", "", f"ENTRY PRICE: {zone}", ""]
-    lines += [f"✅ TP{k + 1}: {_p(tp, d)}" for k, tp in enumerate(sig.tps)]
-    lines += [f"❌ Stop Loss: {_p(sig.sl, d)}", "", "⏰ TIMEFRAME : 15 MIN", "", "⚠️ USE PROPER RISK MANAGEMENT"]
+    lines = [f"🕯️{sig.label} SIGNAL🕯️", "", f"DIRECTION: {sig.side} {sig.label}", "", f"ENTRY PRICE: {zone}",
+             f"CALLED AT: {_p(sig.price, d)}", ""]
+    lines += ["✅ " + tp_line(k, tp, ": ") for k, tp in enumerate(sig.tps)]
+    lines += [f"❌ Stop Loss: {sl_line}", "", "⏰ TIMEFRAME : 15 MIN", "", "⚠️ USE PROPER RISK MANAGEMENT"]
     return "\n".join(lines)
 
 

@@ -1,7 +1,7 @@
 """Follows open signals and posts TP / SL updates as replies to the original message.
 
 Rules: candles are processed in order; the stop is checked before targets inside a candle (conservative);
-after TP1 the stop moves to the entry price (breakeven). Pips are measured from the zone midpoint.
+after TP1 the stop moves to the entry price (breakeven). Pips are measured from the called (entry) price.
 """
 import pandas as pd
 from . import notify
@@ -17,8 +17,9 @@ def new_trade(sig, message_id, number=None):
 
 
 def _pips(t, price):
+    """Pips gained from the called price to `price` (negative for a loss)."""
     sign = 1 if t["side"] == "BUY" else -1
-    return int(round((price - t["ref"]) * sign / t["pip"]))
+    return int(round((price - t["entry"]) * sign / t["pip"]))
 
 
 def resolve(t, df, run_thr, tf_min=15):
@@ -47,8 +48,8 @@ def resolve(t, df, run_thr, tf_min=15):
         if t["hit"] >= len(t["tps"]):
             out.append("HIT ALL TP ✅")
             t["closed"] = True
-        elif t["hit"] == 0 and not t["running_sent"] and abs(fav - t["ref"]) >= run_thr and \
-                ((fav > t["ref"]) if buy else (fav < t["ref"])):
+        elif t["hit"] == 0 and not t["running_sent"] and abs(fav - t["entry"]) >= run_thr and \
+                ((fav > t["entry"]) if buy else (fav < t["entry"])):
             out.append(f"Trade active and running +{_pips(t, fav)}PIPS ✅\n\n{notify.FOOTER}")
             t["running_sent"] = True
         t["done_until"] = ts.isoformat()

@@ -88,10 +88,11 @@ def _candles(rows, start="2026-01-01 00:15"):
 def test_tracker_running_then_tp1_tp3_all():
     from scanner import tracker
     t = _trade()
-    ev = tracker.resolve(t, _candles([(3573.5, 3570), (3578.5, 3572), (3589, 3578)]), run_thr=2.5)
+    ev = tracker.resolve(t, _candles([(3577, 3570), (3578.5, 3572), (3589, 3578)]), run_thr=2.5)
     heads = [e.split("\n")[0] for e in ev]
-    assert heads == ["Trade active and running +35PIPS ✅", "HIT TP1 ✅ +80PIPS", "HIT TP2 ✅ +130PIPS",
-                     "HIT TP3 ✅ +180PIPS", "HIT ALL TP ✅"]
+    # entry 3574: running +30, TP1 3578 = +40, TP2 3583 = +90, TP3 3588 = +140 pips (pip = 0.10)
+    assert heads == ["Trade active and running +30PIPS ✅", "HIT TP1 ✅ +40PIPS", "HIT TP2 ✅ +90PIPS",
+                     "HIT TP3 ✅ +140PIPS", "HIT ALL TP ✅"]
     assert t["closed"] and t["hit"] == 3
 
 
@@ -106,7 +107,7 @@ def test_gold_stop_stays_until_tp2_then_moves_to_entry():
     from scanner import tracker
     t = _trade(); t["be_after"] = 2
     ev = tracker.resolve(t, _candles([(3579, 3572), (3575, 3573.5), (3575, 3570)]), run_thr=2.5)  # TP1 then pullback to 3570
-    assert [e.split("\n")[0] for e in ev] == ["HIT TP1 ✅ +80PIPS"] and not t["closed"]            # still running, no BE
+    assert [e.split("\n")[0] for e in ev] == ["HIT TP1 ✅ +40PIPS"] and not t["closed"]            # still running, no BE
     ev = tracker.resolve(t, _candles([(3584, 3574.5), (3575, 3574)], start="2026-01-01 01:00"), run_thr=2.5)
     assert ev[0].startswith("HIT TP2") and ev[-1].startswith("STOPPED AT BE") and t["closed"]
 
@@ -167,7 +168,8 @@ def test_message_formats_match_references():
     from scanner.strategy import make_signal
     now = pd.Timestamp("2026-01-01", tz="UTC")
     g = notify.format_signal(make_signal("GOLD", "BUY", 3567, 3573, 3574, now, 3, [], get_symbol("GOLD")), 5)
-    assert g.startswith("5. GOLD BUY SETUP\n\nGold Buy Zone 3573 - 3567\n\nSL : 3562\n\nTP1 : 3578\nTP2 : 3583\nTP3 : 3588\nTP4 : Hold")
+    assert g.startswith("5. GOLD BUY SETUP\n\nGold Buy Zone 3573 - 3567\nCalled at : 3574\n\nSL : 3562 (-120 pips)\n\n"
+                        "TP1 : 3578 (+40 pips)\nTP2 : 3583 (+90 pips)\nTP3 : 3588 (+140 pips)\nTP4 : Hold")
     b = notify.format_signal(make_signal("BTC", "SELL", 56140, 56641, 56100, now, 3, [], get_symbol("BTC")))
     assert "DIRECTION: SELL BTCUSD" in b and "ENTRY PRICE: 56140 - 56641" in b and "❌ Stop Loss:" in b and "TP4:" in b
 
@@ -185,3 +187,33 @@ def test_tp1_message_announces_breakeven_only_when_it_applies():
     t = _trade(); t["be_after"] = None
     ev = tracker.resolve(t, _candles([(3578.5, 3572)]), run_thr=2.5)
     assert not any("Stop moved to entry" in e for e in ev)
+
+
+def test_every_pip_number_is_calculated_from_the_called_price():
+    """Signal lines and update messages must equal |price - entry| / pip, never hard-coded."""
+    import re
+    from scanner import notify, tracker
+    from scanner.config import get_symbol
+    from scanner.strategy import make_signal
+    now = pd.Timestamp("2026-01-01", tz="UTC")
+    cases = [("GOLD", "BUY", 3567, 3573, 3574), ("GOLD", "SELL", 3590, 3596, 3589),
+             ("BTC", "SELL", 56140, 56641, 56100), ("BTC", "BUY", 56140, 56641, 56700),
+             ("ETH", "BUY", 2900, 2915, 2920)]
+    for name, side, lo, hi, price in cases:
+        sym = get_symbol(name)
+        sig = make_signal(name, side, lo, hi, price, now, 3, [], sym)
+        text = notify.format_signal(sig)
+        shown = [int(x) for x in re.findall(r"\(([+-]\d+) pips\)", text)]
+        want = [round(abs(tp - price) / sym.pip) for tp in sig.tps] + [-round(abs(sig.sl - price) / sym.pip)]
+        assert sorted(shown) == sorted([w for w in want if w > 0] + [w for w in want if w < 0]), (name, text)
+        # every target is on the profit side, the stop on the loss side
+        for tp in sig.tps:
+            assert (tp > price) if side == "BUY" else (tp < price)
+        assert (sig.sl < price) if side == "BUY" else (sig.sl > price)
+        # update messages use the same numbers
+        t = tracker.new_trade(sig, 1, 1)
+        df = _candles([(max(sig.tps) if side == "BUY" else price, price if side == "BUY" else min(sig.tps))])
+        ev = tracker.resolve(t, df, run_thr=1e18)
+        tp_msgs = [e for e in ev if e.startswith("HIT TP")]
+        for k, msg in enumerate(tp_msgs):
+            assert f"+{round(abs(sig.tps[k] - price) / sym.pip)}PIPS" in msg.split("\n")[0], (name, msg)

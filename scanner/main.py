@@ -62,11 +62,11 @@ def check_chat(env):
 
 def script(sig, steps, thr):
     """Fake candles that walk a signal through steps: run, tp1..tp4, back (retrace to entry), sl."""
-    buy, p, ref = sig.side == "BUY", sig.price, sig.ref
+    buy, p = sig.side == "BUY", sig.price
     mid = (p + sig.tps[0]) / 2          # stays between entry and TP1 so it never touches the entry stop
     rows = []
     for st in steps:
-        if st == "run":   hi, lo = (ref + thr * 1.02, ref) if buy else (ref, ref - thr * 1.02)
+        if st == "run":   hi, lo = (p + thr * 1.02, p + 0.0001) if buy else (p - 0.0001, p - thr * 1.02)
         elif st == "back": hi, lo = (p, p - 0.0001) if buy else (p + 0.0001, p)
         elif st == "sl":  hi, lo = (p, sig.sl - 0.0001) if buy else (sig.sl + 0.0001, p)
         else:
