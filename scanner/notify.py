@@ -15,8 +15,10 @@ def send(sig, settings):
     print("\n" + text + "\n")
     if settings.telegram_token and settings.telegram_chat:
         try:
-            requests.post(f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage",
-                          data={"chat_id": settings.telegram_chat, "text": text}, timeout=15).raise_for_status()
+            r = requests.post(f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage",
+                              data={"chat_id": settings.telegram_chat, "text": text}, timeout=15)
+            if not r.ok:
+                print(f"[warn] telegram rejected the message: {r.status_code} {r.text} (chat id used: {settings.telegram_chat!r})")
         except Exception as e:
             print(f"[warn] telegram failed: {e}")
     new = not os.path.exists(settings.log_file)
