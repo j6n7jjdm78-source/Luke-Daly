@@ -11,3 +11,7 @@ state/*
 !state/scoreboard-*
 !state/candidates.csv
 !state/liqmax.json
+wallet/state/*
+!wallet/state/.gitkeep
+SELLALL
+burner.json
