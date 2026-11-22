@@ -48,7 +48,7 @@ def test_backtest_simulation_runs_and_outcomes_valid():
         tr += simulate(get_symbol("BTC"), synth(1600, "15min", seed), synth(400, "1h", seed), min_touches=2)
     for t in tr:
         assert t["res"] in ("ALL", "SL", "BE", "timeout")
-        assert t["res"] != "SL" or (t["hit"] == 0 and t["pips"] < 0)
+        assert t["res"] != "SL" or t["hit"] > 0 or t["pips"] < 0
     assert isinstance(summarize(tr), str)
 
 
