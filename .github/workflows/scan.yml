@@ -33,6 +33,6 @@ jobs:
           case "${{ github.event.inputs.mode || 'scan' }}" in
             test) python -m scanner.main --test ;;
             chat-id) python -m scanner.main --chat-id ;;
-            backtest) python -m scanner.backtest --days 90 ;;
+            backtest) python -m scanner.backtest --days 90 --min-touches 2 3 4 ;;
             *) python -m scanner.main --once --source public ;;
           esac
