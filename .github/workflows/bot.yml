@@ -1,6 +1,6 @@
 name: cliperz-bot
 # Runs the call-out bot on GitHub's free runners (public repo = unlimited minutes).
-# GitHub schedules can't be faster than 5 minutes, so each run stays alive ~28 minutes and runs the bot every 2 minutes inside it;
+# GitHub schedules can't be faster than 5 minutes, so each run stays alive ~28 minutes and runs the bot about once a minute inside it;
 # the schedule queues the next run right behind it, so coverage is continuous apart from a ~2 minute setup gap between runs.
 # Kill switch: add an empty file named STOP to the repo root and posting stops.
 on:
@@ -46,16 +46,17 @@ jobs:
           mkdir -p ~/.config/cliperz-bot && chmod 700 ~/.config/cliperz-bot
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:TOKEN_KEY -in state/tokens.enc -out ~/.config/cliperz-bot/tokens.json
           chmod 600 ~/.config/cliperz-bot/tokens.json
-      - name: Run the bot every 2 minutes for ~28 minutes
+      - name: Run the bot about once a minute for ~28 minutes
         run: |
           END=$((SECONDS + 1680))
           while [ $SECONDS -lt $END ]; do
+            T0=$SECONDS
             git fetch -q origin main 2>/dev/null && git cat-file -e origin/main:STOP 2>/dev/null && touch STOP   # kill switch from the repo
             BEFORE="$(wc -l < calls.csv) $(md5sum ~/.config/cliperz-bot/tokens.json | cut -d' ' -f1) $(grep -c 'hit' calls.csv)"
-            python3 bot/bot.py || echo "bot run failed, will retry in 2 minutes"
+            python3 bot/bot.py || echo "bot run failed, will retry next minute"
             AFTER="$(wc -l < calls.csv) $(md5sum ~/.config/cliperz-bot/tokens.json | cut -d' ' -f1) $(grep -c 'hit' calls.csv)"
             [ "$BEFORE" != "$AFTER" ] && bash deploy/save_state.sh   # new call, milestone, or refreshed login: save right away
-            sleep 120
+            USED=$((SECONDS - T0)); [ $USED -lt 60 ] && sleep $((60 - USED))
           done
       - name: Save X login (re-encrypted) and bot state
         if: always()

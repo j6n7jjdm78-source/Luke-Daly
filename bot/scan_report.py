@@ -28,3 +28,11 @@ for p in sol:
         ok, w, summ = bot.safety(ca); passed.append(f"${q['baseToken']['symbol']} ${mc/1000:.0f}k liq ${liq/1000:.0f}k safety {'PASS' if ok else 'BLOCKED: ' + w}")
 print(f"{len(sol)} candidate tokens | " + ", ".join(f"{v} {k}" for k, v in fails.most_common(4)))
 print("PASSED MARKET FILTERS: " + ("; ".join(passed) if passed else "none"))
+
+try:   # new-pair tier funnel: how many pools are being watched and what happened to the candidates logged so far
+    import json, time, csv
+    w = json.load(open(os.path.join(bot.STATE, "watch.json"))); ages = [(time.time() - (v["t"] if isinstance(v, dict) else v)) / 60 for v in w.values()]
+    cr = bot.cand_rows(); dec = collections.Counter(x["decision"] for x in cr)
+    print(f"NEW PAIRS: {len(w)} watched, {sum(bot.E['min_age_min'] <= a <= bot.E['max_age_min'] for a in ages)} in the {bot.E['min_age_min']}-{bot.E['max_age_min']} min window | logged {len(cr)}: {dict(dec)}")
+except Exception as e:
+    print("NEW PAIRS: no data yet")

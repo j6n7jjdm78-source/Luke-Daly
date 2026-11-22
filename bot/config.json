@@ -32,5 +32,17 @@
   "min_h1_change_pct": -10,
   "min_m5_change_pct": -8,
   "min_buy_ratio": 1.2,
-  "max_vol_mcap_ratio": 25
+  "max_vol_mcap_ratio": 25,
+  "early_min_age_min": 5,
+  "early_max_age_min": 45,
+  "early_min_holders": 50,
+  "early_max_score": 30,
+  "early_min_liq": 8000,
+  "early_buy_ratio": 1.5,
+  "early_min_trades": 100,
+  "early_max_per_day": 3,
+  "early_max_run_pct": 100,
+  "early_pages": 6,
+  "early_min_mcap": 10000,
+  "early_max_mcap": 60000
 }
