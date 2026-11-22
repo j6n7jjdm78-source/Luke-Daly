@@ -86,10 +86,33 @@ class Signal:
     score: int
     time: pd.Timestamp
     reasons: list
+    tps: list = None
+    zone_lo: float = None
+    zone_hi: float = None
+    ref: float = None       # zone midpoint: pips in updates are measured from here
+    style: str = "btc"
+    label: str = ""
+    pip: float = 1.0
+    decimals: int = 0
+    n_tp: int = 4
 
 
-def evaluate(name, df15, df1h, min_touches=3, min_rr=1.5, i=-2, ltf_min=15, htf_min=60):
-    """Evaluate bar i of df15 (default: last closed bar; the forming bar is -1)."""
+def make_signal(name, side, zone_lo, zone_hi, price, time, touches, reasons, sym):
+    """Build a signal with the symbol's level profile. None if price is already past TP1 or the stop."""
+    from .levels import build
+    lv = build(side, zone_lo, zone_hi, price, sym)
+    if side == "BUY" and not (lv["sl"] < price < lv["tps"][0]): return None
+    if side == "SELL" and not (lv["tps"][0] < price < lv["sl"]): return None
+    return Signal(name, side, price, lv["sl"], lv["tps"][0], min(5, touches), time, reasons, tps=lv["tps"],
+                  zone_lo=lv["lo"], zone_hi=lv["hi"], ref=lv["ref"], style=sym.style, label=sym.label or name,
+                  pip=sym.pip, decimals=sym.decimals, n_tp=len(lv["tps"]))
+
+
+def evaluate(name, df15, df1h, min_touches=3, min_rr=None, i=-2, ltf_min=15, htf_min=60, sym=None):
+    """Evaluate bar i of df15 (default: last closed bar; the forming bar is -1). min_rr is unused (levels are fixed)."""
+    if sym is None:
+        from .config import get_symbol
+        sym = get_symbol(name) if name in ("GOLD", "BTC", "ETH") else get_symbol("BTC")
     n = len(df15) + i + 1 if i < 0 else i + 1
     d = df15.iloc[:n]
     if len(d) < 120 or len(df1h) < 80:
@@ -104,35 +127,24 @@ def evaluate(name, df15, df1h, min_touches=3, min_rr=1.5, i=-2, ltf_min=15, htf_
         return None
 
     bar = d.iloc[-1]
-    a = atr(d).iloc[-1]
     zones = find_zones(d, h)
     rng = max(bar.high - bar.low, 1e-12)
     why = [f"15m & 1h trend {'UP' if t15 > 0 else 'DOWN'}"]
 
-    if t15 > 0:  # look for support bounce
+    if t15 > 0:  # support bounce
         sup = [z for z in zones if z.mid < bar.close and z.touches >= min_touches]
         if not sup: return None
-        z = max(sup, key=lambda z: z.mid)  # nearest support below
+        z = max(sup, key=lambda z: z.mid)
         lower_wick = (min(bar.open, bar.close) - bar.low) / rng
         if bar.low <= z.hi and bar.close > z.hi and bar.close > bar.open and lower_wick >= 0.25:
-            sl = z.lo - 0.3 * a
-            risk = bar.close - sl
-            res = [x for x in zones if x.lo > bar.close + risk]
-            tp = min(res, key=lambda x: x.lo).lo if res else bar.close + 2 * risk
-            if risk > 0 and (tp - bar.close) / risk >= min_rr:
-                why += [f"bounce off support {z.lo:,.2f}-{z.hi:,.2f} ({z.touches} touches)", f"RR {(tp - bar.close) / risk:.1f}"]
-                return Signal(name, "BUY", bar.close, sl, tp, min(5, z.touches), d.index[-1], why)
+            why.append(f"bounce off support {z.lo:,.2f}-{z.hi:,.2f} ({z.touches} touches)")
+            return make_signal(name, "BUY", z.lo, z.hi, bar.close, d.index[-1], z.touches, why, sym)
     else:  # resistance rejection
         res = [z for z in zones if z.mid > bar.close and z.touches >= min_touches]
         if not res: return None
         z = min(res, key=lambda z: z.mid)
         upper_wick = (bar.high - max(bar.open, bar.close)) / rng
         if bar.high >= z.lo and bar.close < z.lo and bar.close < bar.open and upper_wick >= 0.25:
-            sl = z.hi + 0.3 * a
-            risk = sl - bar.close
-            sup = [x for x in zones if x.hi < bar.close - risk]
-            tp = max(sup, key=lambda x: x.hi).hi if sup else bar.close - 2 * risk
-            if risk > 0 and (bar.close - tp) / risk >= min_rr:
-                why += [f"rejection at resistance {z.lo:,.2f}-{z.hi:,.2f} ({z.touches} touches)", f"RR {(bar.close - tp) / risk:.1f}"]
-                return Signal(name, "SELL", bar.close, sl, tp, min(5, z.touches), d.index[-1], why)
+            why.append(f"rejection at resistance {z.lo:,.2f}-{z.hi:,.2f} ({z.touches} touches)")
+            return make_signal(name, "SELL", z.lo, z.hi, bar.close, d.index[-1], z.touches, why, sym)
     return None

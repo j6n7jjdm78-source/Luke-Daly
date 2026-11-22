@@ -1,28 +1,61 @@
 import csv, os
 import requests
 
-
-def fmt(sig):
-    arrow = "🟢" if sig.side == "BUY" else "🔴"
-    return (f"{arrow} {sig.symbol} {sig.side}  (level strength {sig.score})\n"
-            f"Entry ≈ {sig.price:,.2f}\nSL: {sig.sl:,.2f}\nTP: {sig.tp:,.2f}\n"
-            f"Why: {', '.join(sig.reasons)}\nBar: {sig.time:%Y-%m-%d %H:%M} UTC\n"
-            f"Not financial advice - manage your risk.")
+FOOTER = "Take partials. Manage Trade Risk. If hold set BE. Hold risk with Breakeven(BE)"
 
 
-def send(sig, settings):
-    text = fmt(sig)
+def _p(x, d):
+    return f"{x:,.{d}f}".replace(",", "") if d else f"{x:.0f}"
+
+
+def format_signal(sig, number=None):
+    d = sig.decimals
+    if sig.style == "gold":
+        word = "Buy" if sig.side == "BUY" else "Sell"
+        zone = (f"{_p(sig.zone_hi, d)} - {_p(sig.zone_lo, d)}" if sig.side == "BUY"
+                else f"{_p(sig.zone_lo, d)} - {_p(sig.zone_hi, d)}")
+        lines = [f"{number}. GOLD {sig.side} SETUP" if number else f"GOLD {sig.side} SETUP", "",
+                 f"Gold {word} Zone {zone}", "", f"SL : {_p(sig.sl, d)}", ""]
+        lines += [f"TP{k + 1} : {_p(tp, d)}" for k, tp in enumerate(sig.tps)]
+        lines += ["TP4 : Hold", "",
+                  "🔑 Use suitable lot sizes based on your capital. Money management is key to long term success"]
+        return "\n".join(lines)
+    zone = (f"{_p(sig.zone_hi, d)} - {_p(sig.zone_lo, d)}" if sig.side == "BUY"
+            else f"{_p(sig.zone_lo, d)} - {_p(sig.zone_hi, d)}")
+    lines = [f"🕯️{sig.label} SIGNAL🕯️", "", f"DIRECTION: {sig.side} {sig.label}", "", f"ENTRY PRICE: {zone}", ""]
+    lines += [f"✅ TP{k + 1}: {_p(tp, d)}" for k, tp in enumerate(sig.tps)]
+    lines += [f"❌ Stop Loss: {_p(sig.sl, d)}", "", "⏰ TIMEFRAME : 15 MIN", "", "⚠️ USE PROPER RISK MANAGEMENT"]
+    return "\n".join(lines)
+
+
+def _post(settings, text, reply_to=None):
+    """Send to Telegram. Returns the message_id or None."""
     print("\n" + text + "\n")
-    if settings.telegram_token and settings.telegram_chat:
-        try:
-            r = requests.post(f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage",
-                              data={"chat_id": settings.telegram_chat, "text": text}, timeout=15)
-            if not r.ok:
-                print(f"[warn] telegram rejected the message: {r.status_code} {r.text} (chat id used: {settings.telegram_chat!r})")
-        except Exception as e:
-            print(f"[warn] telegram failed: {e}")
+    if not (settings.telegram_token and settings.telegram_chat):
+        return None
+    data = {"chat_id": settings.telegram_chat, "text": text}
+    if reply_to:
+        data["reply_to_message_id"] = reply_to
+    try:
+        r = requests.post(f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage", data=data, timeout=15)
+        if not r.ok:
+            print(f"[warn] telegram rejected the message: {r.status_code} {r.text} (chat id used: {settings.telegram_chat!r})")
+            return None
+        return r.json()["result"]["message_id"]
+    except Exception as e:
+        print(f"[warn] telegram failed: {e}")
+        return None
+
+
+def send(sig, settings, number=None):
+    mid = _post(settings, format_signal(sig, number))
     new = not os.path.exists(settings.log_file)
     with open(settings.log_file, "a", newline="") as f:
         w = csv.writer(f)
-        if new: w.writerow(["time", "symbol", "side", "price", "sl", "tp", "score"])
+        if new: w.writerow(["time", "symbol", "side", "price", "sl", "tp1", "score"])
         w.writerow([sig.time, sig.symbol, sig.side, sig.price, sig.sl, sig.tp, sig.score])
+    return mid
+
+
+def reply(text, message_id, settings):
+    return _post(settings, text, reply_to=message_id)
