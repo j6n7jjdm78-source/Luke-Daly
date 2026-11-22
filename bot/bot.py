@@ -114,6 +114,14 @@ def pair(addr):
     ps = [p for p in ps if p["chainId"] == CFG["chain"]]
     return max(ps, key=lambda p: (p.get("liquidity") or {}).get("usd", 0)) if ps else None
 
+def name_ok(*names):
+    """False if a coin's ticker or name contains a crude or offensive word. Short words must match as whole words (so 'assume' is fine)."""
+    import re
+    text = " ".join(n for n in names if n).lower()
+    for w in CFG.get("blocked_name_words", []):
+        if (len(w) <= 4 and re.search(r"(?<![a-z])" + re.escape(w) + r"(?![a-z])", text)) or (len(w) > 4 and w in text): return False
+    return True
+
 def candidate_addresses():
     """Two sources: DexScreener's newest Solana profiles, and GeckoTerminal's trending Solana pools (where coins with real volume show up)."""
     out = []
@@ -133,6 +141,7 @@ def candidates():
         if addr in seen: continue
         q = pair(addr)
         if not q or not q.get("pairCreatedAt"): continue
+        if not name_ok(q["baseToken"].get("symbol"), q["baseToken"].get("name")): continue
         age = (now.timestamp() * 1000 - q["pairCreatedAt"]) / 3.6e6
         mc, liq, vol = q.get("marketCap") or 0, (q.get("liquidity") or {}).get("usd", 0), (q.get("volume") or {}).get("h24", 0)
         tx = (q.get("txns") or {}).get("h1", {})
@@ -367,6 +376,7 @@ def early_candidates():
             ca = q["baseToken"]["address"]
             if ca not in best or (q.get("liquidity") or {}).get("usd", 0) > (best[ca].get("liquidity") or {}).get("usd", 0): best[ca] = q
         for ca, q in best.items():
+            if not name_ok(q["baseToken"].get("symbol"), q["baseToken"].get("name")): continue
             w = watch[ca]; age_m = (t_now - w["t"]) / 60
             mc, liq = q.get("marketCap") or 0, (q.get("liquidity") or {}).get("usd", 0)
             tx = (q.get("txns") or {}).get("h1", {}); b, sl = tx.get("buys", 0), tx.get("sells", 0); pc = q.get("priceChange") or {}
@@ -413,6 +423,16 @@ def peak_since(q, called_iso):
     except Exception:
         return None
 
+def record_rug():
+    """Circuit breaker: if N calls rug within 24h, pause all posting (STOP file) and tell the owner. The owner resumes by asking."""
+    f = f"{STATE}/rug_events.json"
+    try: ev = [t for t in json.load(open(f)) if now.timestamp() - t < 86400]
+    except Exception: ev = []
+    ev.append(now.timestamp()); json.dump(ev, open(f, "w"))
+    if len(ev) >= CFG.get("circuit_breaker_rugs", 2) and not DRY:
+        open(f"{ROOT}/STOP", "w").write("circuit breaker")
+        owner_msg(f"⛔ CIRCUIT BREAKER: {len(ev)} calls rugged within 24h. All posting is PAUSED. Tell Claude 'resume' once you have looked at it.")
+
 def track():
     rs = rows()
     for x in rs:
@@ -427,7 +447,8 @@ def track():
             json.dump(lm, open(lf, "w"))
         except Exception: pass
         if not q or liq_now < 1000 or m5 <= -80:      # liquidity pulled / price collapsed: it is a rug, never a "result"
-            if x["status"] != "rugged": owner_msg(f"⚠️ ${x['token']} RUGGED: liquidity pulled or price collapsed. Logged as a loss.")
+            if x["status"] != "rugged":
+                owner_msg(f"⚠️ ${x['token']} RUGGED: liquidity pulled or price collapsed. Logged as a loss."); record_rug()
             x["status"] = "rugged"; x["current_mcap"] = 0; x["multiple"] = 0.0; continue
         x["current_mcap"] = mc; x["multiple"] = round(mc / float(x["mcap_at_call"]), 2)
         if liq_now < 5000 or x["multiple"] > 1000: continue   # untrustworthy numbers: no milestone posts
@@ -436,7 +457,7 @@ def track():
         x["peak_mcap"] = round(pk); peak_mult = pk / float(x["mcap_at_call"])
         if peak_mult > 1000: continue
         hit = [m for m in CFG["result_milestones"] if peak_mult >= m]
-        done = int(x["status"].split("x")[0][3:] or 0) if x["status"].startswith("hit") else 0
+        done = float(x["status"][3:].rstrip("x") or 0) if x["status"].startswith("hit") else 0
         if hit and hit[-1] > done:  # post once per new milestone
             text = (f"${x['token']}: called at {fmt(float(x['mcap_at_call']))}, peaked at {fmt(pk)} = {peak_mult:.1f}x\n"
                     f"Peak since the call. Tracked from the original post.")
