@@ -113,7 +113,24 @@ def save(rs):
     w = csv.DictWriter(open(CALLS, "w", newline=""), FIELDS); w.writeheader(); w.writerows(rs)
 
 def fmt(n): return f"${n/1000:.0f}k" if n < 1e6 else f"${n/1e6:.2f}m"
+PAIRS = {}   # contract -> (fetched_at, best pair or None); filled 30 at a time so a scan makes a few requests instead of ~100
+
+def prefetch(addrs):
+    """Fetch many coins at once from DexScreener's batch endpoint (30 per request) into the cache that pair() reads."""
+    todo = [a for a in dict.fromkeys(addrs) if a not in PAIRS or time.time() - PAIRS[a][0] > 60]
+    for i in range(0, len(todo), 30):
+        chunk = todo[i:i + 30]
+        try: ps = http("https://api.dexscreener.com/tokens/v1/solana/" + ",".join(chunk))
+        except Exception: continue
+        best = {}
+        for q in ps:
+            a = (q.get("baseToken") or {}).get("address")
+            if a and (a not in best or (q.get("liquidity") or {}).get("usd", 0) > (best[a].get("liquidity") or {}).get("usd", 0)): best[a] = q
+        for a in chunk: PAIRS[a] = (time.time(), best.get(a))
+
 def pair(addr):
+    hit = PAIRS.get(addr)
+    if hit and time.time() - hit[0] <= 60: return hit[1]
     ps = http(f"https://api.dexscreener.com/latest/dex/tokens/{addr}").get("pairs") or []
     ps = [p for p in ps if p["chainId"] == CFG["chain"]]
     return max(ps, key=lambda p: (p.get("liquidity") or {}).get("usd", 0)) if ps else None
@@ -141,7 +158,7 @@ def candidate_addresses():
             for p in gt_get(f"https://api.geckoterminal.com/api/v2/networks/{ch}/{path}")["data"]:
                 out.append(p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1])
         except Exception: pass
-        time.sleep(2)
+        time.sleep(1)
     return list(dict.fromkeys(out))
 
 def quality_score(q, mc, liq, vol):
@@ -160,8 +177,8 @@ def quality_score(q, mc, liq, vol):
 
 def candidates():
     seen = {x["contract"] for x in rows()}
-    for addr in candidate_addresses():
-        if addr in seen: continue
+    addrs = [a for a in candidate_addresses() if a not in seen]; prefetch(addrs)
+    for addr in addrs:
         q = pair(addr)
         if not q or not q.get("pairCreatedAt"): continue
         if not name_ok(q["baseToken"].get("symbol"), q["baseToken"].get("name")): continue
@@ -390,7 +407,7 @@ def early_candidates():
                 if float(a["reserve_in_usd"]) >= 4000 and ca not in watch:
                     watch[ca] = {"t": created, "p0": float(a.get("base_token_price_usd") or 0) or None}
             except Exception: continue
-        time.sleep(3)
+        time.sleep(1.5)
     t_now = now.timestamp()
     watch = {ca: w for ca, w in watch.items() if (t_now - w["t"]) / 60 <= 90}          # forget anything older than 90 min
     json.dump(watch, open(wf, "w"))
@@ -462,6 +479,7 @@ def record_rug():
 
 def track():
     rs = rows()
+    prefetch([x["contract"] for x in rs if x["status"] == "open" or x["status"].startswith("hit")])
     for x in rs:
         if x["status"] not in ("open",) and not x["status"].startswith("hit"): continue
         q = pair(x["contract"]); mc = float((q or {}).get("marketCap") or 0)
@@ -480,7 +498,9 @@ def track():
         x["current_mcap"] = mc; x["multiple"] = round(mc / float(x["mcap_at_call"]), 2)
         if liq_now < 5000 or x["multiple"] > 1000: continue   # untrustworthy numbers: no milestone posts
         # results show the PEAK multiple since the call (the most it could have gained), always labelled as a peak
-        pk = max(float(x.get("peak_mcap") or 0), mc, peak_since(q, x["called_at_utc"]) or 0)
+        old_pk = float(x.get("peak_mcap") or 0)   # skip the slow chart-history lookup for coins far below their peak or call price (cannot be setting a new peak)
+        far_below = (old_pk >= float(x["mcap_at_call"]) and mc < 0.5 * old_pk) or mc < 0.3 * float(x["mcap_at_call"])
+        pk = max(old_pk, mc, 0 if far_below else (peak_since(q, x["called_at_utc"]) or 0))
         x["peak_mcap"] = round(pk); peak_mult = pk / float(x["mcap_at_call"])
         if peak_mult > 1000: continue
         hit = [m for m in CFG["result_milestones"] if peak_mult >= m]
