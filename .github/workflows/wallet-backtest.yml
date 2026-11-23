@@ -2,6 +2,9 @@ name: wallet-backtest
 # Manual only. Read-only: fetches public candles, runs the exit-rule backtest on calls.csv, uploads the report. No keys, no trading.
 on:
   workflow_dispatch:
+  push:   # runs once on the dev branch when this file changes (dispatch needs the file on main)
+    branches: [claude/ecstatic-carson-wzud1x]
+    paths: ['.github/workflows/wallet-backtest.yml']
 permissions:
   contents: read
 jobs:
