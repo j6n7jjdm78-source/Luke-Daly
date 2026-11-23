@@ -82,5 +82,7 @@
     "suicide"
   ],
   "circuit_breaker_rugs": 2,
-  "min_score": 40
+  "min_score": 40,
+  "max_dump_from_high_pct": 25,
+  "confirm_seconds": 100
 }

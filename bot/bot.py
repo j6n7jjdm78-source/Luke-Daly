@@ -1,7 +1,7 @@
 """Meme coin call-out bot. Run every ~10 min via cron/launchd: python3 bot/bot.py
 Env: X_CLIENT_ID, X_CLIENT_SECRET. Needs tokens.json from auth.py.
 Create a file named STOP in repo root to halt all posting."""
-import os, re, sys, csv, json, time, base64, datetime as dt, statistics as st
+import os, re, sys, threading, csv, json, time, base64, datetime as dt, statistics as st
 import urllib.parse as u, urllib.request as r, urllib.error
 import cliperz_keys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -162,9 +162,11 @@ def name_ok(*names):
         if (len(w) <= 4 and re.search(r"(?<![a-z])" + re.escape(w) + r"(?![a-z])", text)) or (len(w) > 4 and w in text): return False
     return True
 
+_ADDR = [0.0, []]
 def candidate_addresses():
     """Where we look for coins: DexScreener's newest profiles and boosted lists, and GeckoTerminal's trending pools (default, 1h, 6h)
     plus the top pools by 24h volume. Deduplicated. More sources = more coins to judge, every one still goes through the same filters."""
+    if time.time() - _ADDR[0] < 90 and _ADDR[1]: return list(_ADDR[1])    # one shared scan per cycle
     out = []
     ch = CFG["chain"]
     for url in ("https://api.dexscreener.com/token-profiles/latest/v1", "https://api.dexscreener.com/token-boosts/latest/v1",
@@ -177,8 +179,8 @@ def candidate_addresses():
             for p in gt_get(f"https://api.geckoterminal.com/api/v2/networks/{ch}/{path}")["data"]:
                 out.append(p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1])
         except Exception: pass
-        time.sleep(1)
-    return list(dict.fromkeys(out))
+    out = list(dict.fromkeys(out)); _ADDR[0] = time.time(); _ADDR[1] = out
+    return list(out)
 
 def quality_score(q, mc, liq, vol):
     """0-100 ranking of a coin that already passed the hard filters: buying pressure, liquidity depth, healthy liquidity/mcap,
@@ -321,17 +323,50 @@ def safety(ca):
     v = safety_rc(ca)
     return v if v is not None else safety_gt(ca)
 
+def off_high(q):
+    """Price now as a share of the highest 5-minute close in the last hour (None if the chart is unavailable). Low = already dumping from its high."""
+    try:
+        d = gt_get(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{q['pairAddress']}/ohlcv/minute?aggregate=5&limit=12&currency=usd")
+        cl = [c[4] for c in d["data"]["attributes"]["ohlcv_list"] if c[4]]
+        return float(q["priceUsd"]) / max(cl) if cl else None
+    except Exception:
+        return None
+
+def _vet(c, early=False):
+    """Safety gate plus the dump filter for one candidate (run in parallel). Returns (ok, why, summary)."""
+    ca = c[1]["baseToken"]["address"]
+    ok, why, summ = early_safety(ca) if early else safety(ca)
+    if ok:
+        r = off_high(c[1]); lim = CFG.get("max_dump_from_high_pct", 25)
+        if r is not None and r < 1 - lim / 100: return False, f"already {100 * (1 - r):.0f}% off its 1-hour high (dumping)", ""
+    return ok, why, summ
+
+def vet_all(cs, early=False):
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(4) as ex: return list(ex.map(lambda c: _vet(c, early), cs))
+
+def confirmed(ca, mc):
+    """A coin must still pass on a later cycle (at least confirm_seconds after first passing, market cap not falling) before a call posts."""
+    f = f"{STATE}/confirm.json"; os.makedirs(STATE, exist_ok=True); t = time.time()
+    try: d = json.load(open(f))
+    except Exception: d = {}
+    d = {k: v for k, v in d.items() if t - v["t"] < 1800}
+    e = d.get(ca)
+    if e is None or mc < 0.95 * e["mc"]: d[ca] = {"t": t, "mc": mc}; json.dump(d, open(f, "w")); return False
+    json.dump(d, open(f, "w")); return t - e["t"] >= CFG.get("confirm_seconds", 100)
+
 def call_out():
     rs = rows(); today = [x for x in rs if x["called_at_utc"][:10] == str(now.date()) and not x["notes"].startswith("EARLY")]
     if len(today) >= CFG["max_calls_per_day"]: return
     best = None; safe = ""
-    for c in sorted(candidates(), key=lambda c: -c[0])[:5]:
-        ok, why, summ = safety(c[1]["baseToken"]["address"])
+    top = sorted(candidates(), key=lambda c: -c[0])[:5]
+    for c, (ok, why, summ) in zip(top, vet_all(top)):
         log_candidate(c[1]["baseToken"]["address"], c[1], c[4] * 60, None, "pass" if ok else "blocked", "" if ok else why, tier="normal", qscore=c[0])
         if ok: best, safe = c, summ; break
         print(f"[SKIP] {c[1]['baseToken']['symbol']}: {why}")
     if not best: return
     _, q, mc, liq, age = best; sym = q["baseToken"]["symbol"]; ca = q["baseToken"]["address"]
+    if not confirmed(ca, mc): print(f"[WAIT] {sym}: passed, waiting for a second cycle to confirm"); return
     publish_call(q, mc, liq, call_text(sym, mc, liq, age, q, safe, ca))
     if any(x["contract"] == ca for x in rows()): mark_candidate(ca, "posted")
 
@@ -347,9 +382,14 @@ def early_safety(ca):
     v = safety_rc(ca, min_holders=E["min_holders"], max_score=E["max_score"])
     return v if v is not None else (False, "no RugCheck report yet", "")
 
+_GT_LOCK = threading.Lock(); _GT_LAST = [0.0]
 def gt_get(url, tries=4):
-    """GeckoTerminal GET that waits and retries when rate limited (HTTP 429)."""
+    """GeckoTerminal GET: starts are spaced ~1.2 s apart across all threads (free limit ~30/min), and it waits and retries when rate limited (HTTP 429)."""
     for i in range(tries):
+        with _GT_LOCK:
+            wait = 1.2 - (time.time() - _GT_LAST[0])
+            if wait > 0: time.sleep(wait)
+            _GT_LAST[0] = time.time()
         try: return http(url)
         except Exception as e:
             if getattr(e, "code", None) == 429 and i < tries - 1: time.sleep(8 * (i + 1)); continue
@@ -426,7 +466,6 @@ def early_candidates():
                 if float(a["reserve_in_usd"]) >= 4000 and ca not in watch:
                     watch[ca] = {"t": created, "p0": float(a.get("base_token_price_usd") or 0) or None}
             except Exception: continue
-        time.sleep(1.5)
     t_now = now.timestamp()
     watch = {ca: w for ca, w in watch.items() if (t_now - w["t"]) / 60 <= 90}          # forget anything older than 90 min
     json.dump(watch, open(wf, "w"))
@@ -454,11 +493,12 @@ def early_call_out():
     if not CFG.get("early_enabled", True): return
     rs = rows()
     if len([x for x in rs if x["called_at_utc"][:10] == str(now.date()) and x["notes"].startswith("EARLY")]) >= E["max_per_day"]: return
-    for c in sorted(early_candidates(), key=lambda c: -c[0])[:5]:
+    top = sorted(early_candidates(), key=lambda c: -c[0])[:5]
+    for c, (ok, why, safe) in zip(top, vet_all(top, early=True)):
         _, q, mc, liq, age_m, run = c; ca = q["baseToken"]["address"]; sym = q["baseToken"]["symbol"]
-        ok, why, safe = early_safety(ca)
         log_candidate(ca, q, age_m, run, "pass" if ok else "blocked", "" if ok else why)
         if not ok: print(f"[SKIP early] {sym}: {why}"); continue
+        if not confirmed(ca, mc): print(f"[WAIT early] {sym}: passed, waiting for a second cycle to confirm"); return
         tx = q["txns"]["h1"]
         cta = CFG["cta_text"].format(link=CFG["community_link"]) if CFG.get("cta_in_post") and CFG.get("community_link") else ""
         m5 = q["priceChange"].get("m5", 0)
@@ -499,6 +539,18 @@ def record_rug():
 def track():
     rs = rows()
     prefetch([x["contract"] for x in rs if x["status"] == "open" or x["status"].startswith("hit")])
+    PEAKS = {}; todo = []     # chart-history lookups run in parallel, and only for coins that could still be setting a new peak
+    for x in rs:
+        if x["status"] != "open" and not x["status"].startswith("hit"): continue
+        q = pair(x["contract"])
+        if not q: continue
+        mc = float(q.get("marketCap") or 0); liq = float((q.get("liquidity") or {}).get("usd") or 0); old_pk = float(x.get("peak_mcap") or 0); c0 = float(x["mcap_at_call"])
+        if liq < 5000 or mc <= 0 or (old_pk >= c0 and mc < 0.5 * old_pk) or mc < 0.3 * c0: continue
+        todo.append((x["id"], q, x["called_at_utc"]))
+    if todo:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(3) as ex:
+            for (i, _, _), r_ in zip(todo, ex.map(lambda t: peak_since(t[1], t[2]), todo)): PEAKS[i] = r_
     for x in rs:
         if x["status"] not in ("open",) and not x["status"].startswith("hit"): continue
         q = pair(x["contract"]); mc = float((q or {}).get("marketCap") or 0)
@@ -519,7 +571,7 @@ def track():
         # results show the PEAK multiple since the call (the most it could have gained), always labelled as a peak
         old_pk = float(x.get("peak_mcap") or 0)   # skip the slow chart-history lookup for coins far below their peak or call price (cannot be setting a new peak)
         far_below = (old_pk >= float(x["mcap_at_call"]) and mc < 0.5 * old_pk) or mc < 0.3 * float(x["mcap_at_call"])
-        pk = max(old_pk, mc, 0 if far_below else (peak_since(q, x["called_at_utc"]) or 0))
+        pk = max(old_pk, mc, 0 if far_below else (PEAKS.get(x["id"]) or 0))
         x["peak_mcap"] = round(pk); peak_mult = pk / float(x["mcap_at_call"])
         if peak_mult > 1000: continue
         hit = [m for m in CFG["result_milestones"] if peak_mult >= m]
@@ -615,15 +667,57 @@ def daily_recap(hour=21):
         print(f"[SKIP] recap picture failed ({e!r})"); os.remove(f"{STATE}/recap-{now.date()}"); return
     post(f"Daily recap 📊\n{len(rs)} calls in the last 24h. Best peaks shown, labeled as peaks (not current prices).\nCommunity: {CFG.get('community_link', '')}"[:280], media=media, image=png)
 
+def scan_summary():
+    """Short text: how many coins were looked at, why they fail, what passes the market filters and safety, and the closest near-misses.
+    Uses the shared per-cycle scan (cached addresses and batch prices), so it costs almost no extra requests."""
+    import collections
+    C = CFG; seen = {x["contract"] for x in rows()}
+    addrs = candidate_addresses(); prefetch([a for a in addrs if a not in seen])
+    fails = collections.Counter(); passed = []; near = []
+    for ca in addrs:
+        if ca in seen: fails["already called"] += 1; continue
+        q = pair(ca)
+        if not q or not q.get("pairCreatedAt"): fails["no data"] += 1; continue
+        age = (now.timestamp() * 1000 - q["pairCreatedAt"]) / 3.6e6
+        mc = q.get("marketCap") or 0; liq = (q.get("liquidity") or {}).get("usd", 0); vol = (q.get("volume") or {}).get("h24", 0)
+        tx = (q.get("txns") or {}).get("h1", {}); b, sl = tx.get("buys", 0), tx.get("sells", 0); pc = q.get("priceChange") or {}
+        why = []
+        if not C["min_mcap_usd"] <= mc <= C["max_mcap_usd"]: why.append("mcap out of $20-300k")
+        if liq < C["min_liquidity_usd"]: why.append(f"liq<${C['min_liquidity_usd']/1000:.0f}k")
+        if vol < C["min_volume_24h_usd"]: why.append("vol<$50k")
+        if not C["min_age_hours"] <= age <= C["max_age_hours"]: why.append("age out of range")
+        if not C.get("min_h1_change_pct", -5) < pc.get("h1", 0) <= C.get("max_h1_change_pct", 40): why.append("1h move out of range")
+        if pc.get("m5", 0) <= C.get("min_m5_change_pct", -5): why.append("dumping")
+        if b < C.get("min_buy_ratio", 1.3) * max(sl, 1): why.append("weak buy ratio")
+        if b + sl < 200: why.append("<200 trades")
+        if mc and vol > mc * C.get("max_vol_mcap_ratio", 15): why.append("wash volume")
+        if why:
+            fails[why[0]] += 1
+            if len(why) == 1 and mc >= 10000: near.append((vol, f"${q['baseToken']['symbol']} ({why[0]})"))
+        else:
+            ok, w, _ = safety(ca); passed.append(f"${q['baseToken']['symbol']} ${mc/1000:.0f}k liq ${liq/1000:.0f}k safety {'PASS' if ok else 'BLOCKED: ' + w}")
+    out = f"{len(addrs)} candidate tokens | " + ", ".join(f"{v} {k}" for k, v in fails.most_common(4))
+    out += "\nPASSED MARKET FILTERS: " + ("; ".join(passed) if passed else "none")
+    if near: out += "\nNEAR-MISSES (fail one filter): " + ", ".join(n for _, n in sorted(near, reverse=True)[:3])
+    try:
+        tm = json.load(open(f"{STATE}/timings.json")); out += f"\nLast cycle {tm['total']:.0f}s: " + ", ".join(f"{k} {v:.0f}s" for k, v in tm["stages"].items() if v >= 1)
+    except Exception: pass
+    return out
+
 def scan_digest(every=1200):
-    """Private Telegram DM to the owner with a short scan summary, at most once every 20 minutes (the cloud copy needs this as well as the local one)."""
+    """Private Telegram DM to the owner with a short scan summary, at most once every 20 minutes."""
     if DRY: return
     mark = f"{STATE}/scan-digest"; os.makedirs(STATE, exist_ok=True)
     if os.path.exists(mark) and time.time() - os.path.getmtime(mark) < every: return
     open(mark, "w").close()
+    owner_msg("🔎 " + scan_summary())
+
+def weekly_analysis():
+    """Sundays from 18:00 UTC: private DM with what the logged outcomes say about which features predict good calls (needs enough finished outcomes)."""
+    if DRY or now.weekday() != 6 or now.hour < 18 or not _once_today("analysis"): return
     import subprocess
-    out = subprocess.run([sys.executable, f"{ROOT}/bot/scan_report.py"], capture_output=True, text=True, timeout=150).stdout.strip()
-    if out: owner_msg("🔎 " + out)
+    out = subprocess.run([sys.executable, f"{ROOT}/bot/analyze.py"], capture_output=True, text=True, timeout=60).stdout.strip()
+    if out: owner_msg("📊 Weekly outcome analysis\n" + out)
 
 def daily_growth(hour=16):
     """Once a day, private DM only: follower/post counts plus up to 4 ready-to-paste reply drafts for coins people are talking about
@@ -653,6 +747,12 @@ def daily_growth(hour=16):
 
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
-    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, scan_digest):   # one failing stage must not skip the rest
+    t_all = time.time(); times = {}
+    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, weekly_analysis, scan_digest):   # one failing stage must not skip the rest
+        t0 = time.time()
         try: stage()
         except Exception as e: print(f"[WARN] {stage.__name__} failed this cycle: {type(e).__name__}: {str(e)[:100]}")
+        times[stage.__name__] = time.time() - t0
+    try: os.makedirs(STATE, exist_ok=True); json.dump({"total": time.time() - t_all, "stages": times}, open(f"{STATE}/timings.json", "w"))
+    except Exception: pass
+    print("[TIMING] " + f"{time.time() - t_all:.0f}s total | " + ", ".join(f"{k} {v:.0f}s" for k, v in times.items() if v >= 1))
