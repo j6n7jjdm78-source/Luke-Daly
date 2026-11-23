@@ -58,7 +58,8 @@ class Trader:
         size = self.cfg["sizing"]["max_per_trade_sol"]
         try:
             self.risk.check_buy(sig["message_id"], size, self.ex.wallet_sol())
-            check_mint(self.ex.mint_info(sig["mint"]))
+            if self.cfg["execution"].get("check_mint_authority"):
+                check_mint(self.ex.mint_info(sig["mint"]))
             bq = self.ex.quote_buy(sig["mint"], size)
             sq = self.ex.quote_sell(sig["mint"], int(bq["outAmount"]))
             rt = check_sell_route(bq, sq, int(size * LAMPORTS), self.cfg)

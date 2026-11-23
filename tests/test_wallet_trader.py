@@ -47,8 +47,12 @@ def test_duplicate_signal_never_buys_twice(tmp_path):
 def test_no_sell_route_skips_and_unsafe_mint_skips(tmp_path):
     e = Env(tmp_path, route=False)
     assert e.tr.on_signal(e.sig()) == "skipped"
-    f = Env(tmp_path / "x" if (tmp_path / "x").mkdir() is None else tmp_path, info={"mint_authority": "a", "freeze_authority": None})
+    (tmp_path / "x").mkdir()
+    f = Env(tmp_path / "x", info={"mint_authority": "a", "freeze_authority": None})
+    f.tr.cfg = {**CFG, "execution": {**CFG["execution"], "check_mint_authority": True}}   # opt-in check
     assert f.tr.on_signal(f.sig(mid=9, mint="A" * 43)) == "skipped"
+    g = Env(tmp_path / "x", info={"mint_authority": "a", "freeze_authority": None})        # default: call-out bot already screened
+    (tmp_path / "x" / "seen.json").unlink(); assert g.tr.on_signal(g.sig(mid=10, mint="C" * 43)) == "bought"
 
 
 def test_skipped_buy_on_post_that_holds_sends_urgent_alert(tmp_path):

@@ -45,3 +45,15 @@ def candles(pool, since_ts, until_ts, agg=1):
 def jupiter_quote(input_mint, output_mint, amount, slippage_bps=300):
     return _get("https://quote-api.jup.ag/v6/quote", params={
         "inputMint": input_mint, "outputMint": output_mint, "amount": int(amount), "slippageBps": slippage_bps})
+
+
+def mint_info(mint, rpc_url="https://api.mainnet-beta.solana.com"):
+    """Mint and freeze authority from the token mint account (only used when execution.check_mint_authority is on)."""
+    r = S.post(rpc_url, timeout=10, json={"jsonrpc": "2.0", "id": 1, "method": "getAccountInfo",
+                                           "params": [mint, {"encoding": "jsonParsed"}]})
+    r.raise_for_status()
+    v = (r.json().get("result") or {}).get("value")
+    if not v:
+        return None
+    info = v["data"]["parsed"]["info"]
+    return {"mint_authority": info.get("mintAuthority"), "freeze_authority": info.get("freezeAuthority")}

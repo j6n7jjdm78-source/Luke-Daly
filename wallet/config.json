@@ -1,15 +1,42 @@
 {
   "mode": "paper",
   "live_from_id": null,
-  "sizing": {"max_per_trade_sol": 0.05, "max_daily_spend_sol": 0.15, "max_open_positions": 3, "max_daily_loss_sol": 0.1, "max_wallet_sol": 0.5},
-  "execution": {"max_slippage_bps": 300, "max_price_impact_pct": 5, "max_roundtrip_loss_pct": 12, "min_liquidity_usd": 15000, "ack_cap_s": 8},
-  "breaker": {"max_rugs_24h": 2},
+  "sizing": {
+    "max_per_trade_sol": 0.05,
+    "max_daily_spend_sol": 0.15,
+    "max_open_positions": 3,
+    "max_daily_loss_sol": 0.1,
+    "max_wallet_sol": 0.5
+  },
+  "execution": {
+    "max_slippage_bps": 300,
+    "max_price_impact_pct": 5,
+    "max_roundtrip_loss_pct": 12,
+    "min_liquidity_usd": 15000,
+    "ack_cap_s": 8,
+    "check_mint_authority": false
+  },
+  "breaker": {
+    "max_rugs_24h": 2
+  },
   "exit": {
-    "tp": [[2.0, 0.5]],
+    "tp": [
+      [
+        2.0,
+        0.5
+      ]
+    ],
     "stop": 0.6,
     "trail_activate": 2.0,
     "trail_pct": 0.35,
     "time_stop_s": 14400
   },
-  "paper_review": {"min_trades": 20, "min_days": 7}
+  "paper_review": {
+    "min_trades": 20,
+    "min_days": 7
+  },
+  "telegram": {
+    "owner_user_id": null,
+    "tick_seconds": 10
+  }
 }
