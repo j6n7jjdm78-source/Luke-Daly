@@ -7,15 +7,16 @@ Two peak measures per window (both relative to the price when we evaluated the c
 Coins whose pool no longer exists are marked status=no_pool (treated as gone). Resumable: rerun to fill in the rest.
 Usage: python3 tools/backtest/fetch_peaks.py [--limit N]
 Data in: data/backtest/candidates_snapshot.csv   Data out: data/backtest/peaks.csv   (network: DexScreener + GeckoTerminal, free, rate limited)"""
-import csv, datetime as dt, os, sys, time, json
+import csv, datetime as dt, gzip, os, sys, time, json
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["CLIPERZ_DRY"] = "1"
 sys.path.insert(0, os.path.join(ROOT, "bot"))
 import bot  # noqa: E402  (gt_get spaces GeckoTerminal requests and retries 429s)
-bot.GT_SPACING = 4.0     # the free tier allows about 30 requests a minute; a bulk job must stay under it
+bot.GT_SPACING = 7.0     # the free tier allows about 30 requests a minute; a bulk job must stay under it
 
 SRC = os.path.join(ROOT, "data", "backtest", "candidates_snapshot.csv")
 OUT = os.path.join(ROOT, "data", "backtest", "peaks.csv")
+CANDLES = os.path.join(ROOT, "data", "backtest", "candles.jsonl.gz")     # raw 5-minute candles per coin, so later analysis (delayed entry, time to peak) needs no refetch
 WINDOWS = (("1h", 1), ("3h", 3), ("6h", 6), ("24h", 24))
 FIELDS = ["ca", "pool", "status", "n_candles"] + [f"peak_{k}_{w}" for k in ("close", "hi") for w, _ in WINDOWS] + ["fetched_at"]
 SANE_MAX = 200.0   # a peak over 200x is treated as bad data and left empty
@@ -58,7 +59,13 @@ def main():
     limit = int(sys.argv[sys.argv.index("--limit") + 1]) if "--limit" in sys.argv else None
     rows = list(csv.DictReader(open(SRC)))
     done = {r["ca"]: r for r in csv.DictReader(open(OUT))} if os.path.exists(OUT) else {}
-    todo = [r for r in rows if r["ca"] not in done or done[r["ca"]]["status"] == "error"]
+    stored = set()
+    if os.path.exists(CANDLES):
+        with gzip.open(CANDLES, "rt") as fh:
+            for line in fh:
+                try: stored.add(json.loads(line)["ca"])
+                except Exception: pass
+    todo = [r for r in rows if r["ca"] not in done or done[r["ca"]]["status"] == "error" or (done[r["ca"]]["status"] == "ok" and r["ca"] not in stored)]
     def dead(r): return all((r.get(k) or "") in ("0", "0.0") for k in ("m1h", "m3h", "m6h"))      # gone by the first checkpoint already
     todo.sort(key=dead)         # coins that lived past 1h first; instantly-dead ones last (their peak falls back to the checkpoints if never fetched)
     if limit: todo = todo[:limit]
@@ -74,7 +81,9 @@ def main():
                 ets = dt.datetime.fromisoformat(r["eval_utc"]).timestamp(); cs = candles(pool, ets)
                 row["n_candles"] = len(cs)
                 if not cs: row["status"] = "no_candles"
-                else: row["status"] = "ok"; row.update(peaks(cs, float(r["price0"] or 0), ets))
+                else:
+                    row["status"] = "ok"; row.update(peaks(cs, float(r["price0"] or 0), ets))
+                    with gzip.open(CANDLES, "at") as fh: fh.write(json.dumps({"ca": ca, "eval_ts": ets, "price0": float(r["price0"] or 0), "candles": cs}) + "\n")
         except Exception as e:
             row["status"] = "error"; print("  error", ca[:8], type(e).__name__, str(e)[:60])
         res[ca] = row

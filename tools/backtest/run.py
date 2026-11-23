@@ -5,7 +5,7 @@ Usage: python3 tools/backtest/run.py        (no network; fully reproducible from
 
 Honest limits (also printed in the report): small samples, only coins that reached our safety stage or narrowly missed a filter are logged (not every
 coin on the chain), and rules are judged on the same coins they were designed with unless the walk-forward table says otherwise."""
-import csv, math, os, random, statistics, sys
+import csv, gzip, json, math, os, random, statistics, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 D = os.path.join(ROOT, "data", "backtest")
 
@@ -112,6 +112,63 @@ def feature_tables(rows):
         if lines: out += [f"**{title}**", "", "| Bucket | Coins | Peak >= 2x |", "|---|---|---|"] + lines + [""]
     return out
 
+def winners_section(rows, limit=20):
+    """Who were the coins that DID reach 2x? Shows what a rule would have had to let through (and what our gate blocked)."""
+    w = sorted((r for r in rows if r["peak6"] >= 2), key=lambda r: -r["peak6"])
+    if not w: return ["No logged coin reached 2x yet.", ""]
+    out = ["| Coin | Tier | Our decision | Why blocked / flags | Age at eval | Market cap | Liquidity | Holders | Peak (6h) | After 1h |", "|---|---|---|---|---|---|---|---|---|---|"]
+    for r in w[:limit]:
+        why = (r.get("reason") or r["flags"] or "-")[:60]
+        out.append(f"| {r['symbol'][:14]} | {r['tier']} | {r['decision']} | {why} | {r.get('age_m')} min | ${f(r, 'mcap') or 0:,.0f} | ${f(r, 'liq') or 0:,.0f} | {r.get('holders') or '-'} | {r['peak6']:.1f}x | {r['m1']:.2f}x |")
+    called = sum(1 for r in w if r["decision"] in ("pass", "posted")); blocked = sum(1 for r in w if r["decision"] == "blocked")
+    out += ["", f"Of the {len(w)} coins that reached 2x, **{called} were ones we called and {blocked} were blocked by our filters** (most by the RugCheck 'LP unlocked' danger flag).", ""]
+    return out
+
+def load_candles(path=None):
+    """Raw 5-minute candles saved by fetch_peaks.py: {ca: (eval_ts, price0, [(ts, open, high, low, close), ...])}. Empty dict if not fetched yet."""
+    path = path or os.path.join(D, "candles.jsonl.gz"); out = {}
+    if not os.path.exists(path): return out
+    with gzip.open(path, "rt") as fh:
+        for line in fh:
+            try: d = json.loads(line); out[d["ca"]] = (d["eval_ts"], d["price0"], [tuple(c) for c in d["candles"]])
+            except Exception: continue
+    return out
+
+def delayed_peak(eval_ts, price0, candles, delay_min, window_h=6):
+    """Best close within window_h of the evaluation, relative to the price we could really have entered at: the OPEN of the first candle that starts
+    at least delay_min after evaluation (confirmation wait + posting time). delay 0 = the price at evaluation. None if the chart ends before entry."""
+    if delay_min <= 0: entry = price0
+    else:
+        later = [c for c in candles if c[0] >= eval_ts + delay_min * 60]
+        if not later: return None
+        entry = later[0][1]
+    if not entry or entry <= 0: return None
+    after = [c for c in candles if c[0] >= eval_ts + delay_min * 60 and c[0] <= eval_ts + window_h * 3600]
+    if not after: return None
+    return max(c[4] for c in after) / entry
+
+def minutes_to_2x(eval_ts, price0, candles):
+    """Minutes after evaluation until the first 5-minute close at 2x the evaluation price (None if never)."""
+    for c in sorted(candles):
+        if c[4] >= 2 * price0 and c[0] >= eval_ts: return max(0.0, (c[0] + 300 - eval_ts) / 60)      # a 5-minute candle closes at its start + 300 s
+    return None
+
+def latency_section(rows, store, delays=(0, 3, 6, 10)):
+    """Could a bot that posts a few minutes after it spots a coin still have caught the 2x? Hit rate of 'peak >= 2x after entry' per entry delay."""
+    if not store: return ["Raw candles not downloaded yet, so the entry-delay analysis is not available.", ""]
+    groups = {"All logged coins": rows, "Early coins blocked by 'LP unlocked'": [r for r in rows if r["tier"] == "early" and "LP Unlocked" in (r.get("reason") or "") + r["flags"]],
+              "Coins we actually called": [r for r in rows if r["decision"] in ("pass", "posted")]}
+    out = ["| Group | Coins with candles | " + " | ".join(f"Entry after {d} min: peak >= 2x" for d in delays) + " |", "|---|---|" + "---|" * len(delays)]
+    for name, g in groups.items():
+        g = [r for r in g if r["ca"] in store]; cells = []
+        for d in delays:
+            vals = [delayed_peak(*store[r["ca"]], d) for r in g]; vals = [v for v in vals if v is not None]
+            k = sum(1 for v in vals if v >= 2); lo, hi = wilson(k, len(vals)); cells.append(f"{k}/{len(vals)} ({pct(k / len(vals)) if vals else '-'}, CI {pct(lo)}-{pct(hi)})")
+        out.append(f"| {name} | {len(g)} | " + " | ".join(cells) + " |")
+    t = [minutes_to_2x(*store[r["ca"]]) for r in rows if r["ca"] in store and r["peak6"] >= 2]; t = sorted(x for x in t if x is not None)
+    if t: out += ["", f"Of the coins that reached 2x, the first 2x close came a median **{statistics.median(t):.0f} minutes** after we evaluated them (fastest {t[0]:.0f}, slowest {t[-1]:.0f}); a call needs the confirmation wait plus posting time before anyone can act on it."]
+    return out + [""]
+
 def split_by_time(rows):
     s = sorted(rows, key=lambda r: r["eval_utc"]); h = len(s) // 2
     return s[:h], s[h:]
@@ -134,6 +191,8 @@ def build():
     md += ["", "## Stability: first half vs second half of the period", "", "A rule that only works in one half is probably luck.", "", HEAD]
     for name in ("All logged coins (no filter)", "Live: coins we actually called (normal + early)", "Rug-checker style: holders>=50, risk score<=30, no 'LP unlocked'", "Momentum: 5m>0, 1h between +5% and +60%, buy ratio>=1.5"):
         fn = (lambda r, nm=name: r in sets[nm]); md.append(row_md(name + " (first half)", stats([r for r in a if fn(r)]))); md.append(row_md(name + " (second half)", stats([r for r in b if fn(r)])))
+    md += ["", "## The coins that did reach 2x", ""] + winners_section(rows)
+    md += ["", "## Could a bot that posts a few minutes later still have caught them? (entry delay)", ""] + latency_section(rows, load_candles())
     md += ["", "## Which logged features carry signal?", ""] + feature_tables(rows)
     md += ["## Read this before trusting any number", "",
            "- **Small samples.** Confidence intervals above are wide; differences between rule sets are only real if their intervals do not overlap, and even then only for this period.",

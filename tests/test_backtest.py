@@ -87,3 +87,44 @@ def test_report_with_no_data_does_not_crash(tmp_path, monkeypatch):
     (d / "candidates_snapshot.csv").write_text("ca,symbol,eval_utc,age_m,mcap,liq,holders,score,flags,buys,sells,m5,h1,run_pct,decision,reason,price0,m1h,m3h,m6h,tier,qscore,src\n")
     monkeypatch.setattr(run, "D", str(d))
     assert "nothing to test" in run.build()
+
+
+def test_winners_section_lists_who_reached_2x_and_counts_blocked_ones():
+    rows = [coin(3.0, symbol="WIN1", decision="blocked", reason="RugCheck danger: Large Amount of LP Unlocked"), coin(2.5, symbol="WIN2", decision="posted"), coin(1.2, symbol="LOSER")]
+    out = "\n".join(run.winners_section(rows))
+    assert "WIN1" in out and "WIN2" in out and "LOSER" not in out
+    assert "2 were" not in out and "1 were ones we called and 1 were blocked" in out
+    assert run.winners_section([coin(1.0)]) == ["No logged coin reached 2x yet.", ""]
+
+
+# ---------- entry-delay analysis ----------
+def candles_for(prices, start=0, step=300):
+    """prices: list of (open, close) per 5-minute candle starting at `start` seconds after evaluation."""
+    return [(1000 + start + i * step, o, max(o, c), min(o, c), c) for i, (o, c) in enumerate(prices)]
+
+def test_delayed_peak_uses_the_open_of_the_first_candle_after_the_delay():
+    cs = candles_for([(1.0, 1.0), (1.0, 2.5), (2.4, 2.6), (2.5, 3.0)])
+    assert run.delayed_peak(1000, 1.0, cs, 0) == pytest.approx(3.0)                 # from the evaluation price
+    assert run.delayed_peak(1000, 1.0, cs, 5) == pytest.approx(3.0 / 1.0)           # enters at the open of candle 2 (1.0)
+    assert run.delayed_peak(1000, 1.0, cs, 10) == pytest.approx(3.0 / 2.4)          # the pump already happened: only 1.25x left
+    assert run.delayed_peak(1000, 1.0, cs, 600) is None                              # chart ends before we could enter
+
+def test_minutes_to_2x():
+    cs = candles_for([(1.0, 1.1), (1.1, 1.9), (1.9, 2.2), (2.2, 3.0)])
+    assert run.minutes_to_2x(1000, 1.0, cs) == pytest.approx(15.0)       # the 3rd candle (starting at +10 min) closes at +15 min
+    assert run.minutes_to_2x(1000, 1.0, candles_for([(1.0, 1.5)])) is None
+
+def test_latency_section_reports_a_hit_that_disappears_with_delay():
+    rows = [coin(5.0, ca="FAST", tier="early", reason="RugCheck danger: Large Amount of LP Unlocked", decision="blocked"), coin(1.0, ca="SLOW", decision="posted")]
+    store = {"FAST": (1000, 1.0, candles_for([(1.0, 2.2), (2.2, 5.0), (5.0, 4.0)])), "SLOW": (1000, 1.0, candles_for([(1.0, 1.0), (1.0, 1.1)]))}
+    out = "\n".join(run.latency_section(rows, store, delays=(0, 10)))
+    assert "Early coins blocked by 'LP unlocked'" in out and "1/1 (100%" in out
+    assert "median **5 minutes**" in out
+    assert "not available" in "\n".join(run.latency_section(rows, {}))
+
+def test_load_candles_round_trip(tmp_path):
+    import gzip, json
+    p = tmp_path / "c.jsonl.gz"
+    with gzip.open(p, "wt") as fh: fh.write(json.dumps({"ca": "A", "eval_ts": 1, "price0": 2.0, "candles": [[1, 1, 2, 1, 2]]}) + "\n" + "garbage\n")
+    assert run.load_candles(str(p)) == {"A": (1, 2.0, [(1, 1, 2, 1, 2)])}
+    assert run.load_candles(str(tmp_path / "missing.gz")) == {}

@@ -451,7 +451,7 @@ def gt_get(url, tries=4):
             if getattr(e, "code", None) == 429 and i < tries - 1: _GT_COOL[0] = time.time() + max(6, GT_SPACING * 4) * (i + 1); continue    # all threads pause, none sleeps alone
             raise
 
-CAND_FIELDS = "ca,symbol,eval_utc,age_m,mcap,liq,holders,score,flags,buys,sells,m5,h1,run_pct,decision,reason,price0,m1h,m3h,m6h,tier,qscore,src".split(",")
+CAND_FIELDS = "ca,symbol,eval_utc,age_m,mcap,liq,holders,score,flags,buys,sells,m5,h1,run_pct,decision,reason,price0,m1h,m3h,m6h,tier,qscore,src,top1,top10,insiders,creator_prior,lp_locked,lp_providers,launchpad".split(",")
 
 def cand_rows():
     f = f"{STATE}/candidates.csv"
@@ -460,6 +460,26 @@ def cand_rows():
 def cand_save(rs):
     os.makedirs(STATE, exist_ok=True)
     w = csv.DictWriter(open(f"{STATE}/candidates.csv", "w", newline=""), CAND_FIELDS, extrasaction="ignore"); w.writeheader(); w.writerows(rs)
+
+def rc_features(d):
+    """Extra signals from a RugCheck report, logged with every candidate so later analysis can test them (holder concentration, insider networks,
+    creator history, LP lock). Pool/AMM accounts are excluded from the holder shares. Never raises; missing data gives empty strings."""
+    out = dict(top1="", top10="", insiders="", creator_prior="", lp_locked="", lp_providers="", launchpad="")
+    try:
+        known = d.get("knownAccounts") or {}
+        hs = [h for h in (d.get("topHolders") or []) if h.get("address") not in known and h.get("owner") not in known]
+        pcts = sorted((float(h.get("pct") or 0) for h in hs), reverse=True)
+        if pcts: out["top1"] = round(pcts[0], 1); out["top10"] = round(sum(pcts[:10]), 1)
+        out["insiders"] = int(d.get("graphInsidersDetected") or 0)
+        ct = d.get("creatorTokens"); out["creator_prior"] = len(ct) if isinstance(ct, list) else ""
+        mk = d.get("markets") or []
+        lk = [float((m.get("lp") or {}).get("lpLockedPct")) for m in mk if (m.get("lp") or {}).get("lpLockedPct") is not None]
+        if lk: out["lp_locked"] = round(max(lk), 1)
+        if d.get("totalLPProviders") is not None: out["lp_providers"] = int(d.get("totalLPProviders") or 0)
+        lp = d.get("launchpad"); out["launchpad"] = (lp.get("name") if isinstance(lp, dict) else lp) or d.get("deployPlatform") or ""
+    except Exception:
+        pass
+    return out
 
 def log_candidate(ca, q, age_m, run, decision, reason, tier="early", qscore="", src=""):
     """Record a coin the first time it reaches the safety stage, with the features we may want to learn from. Outcomes are filled in later."""
@@ -475,7 +495,7 @@ def log_candidate(ca, q, age_m, run, decision, reason, tier="early", qscore="", 
                    flags="|".join(str(x.get("name")) for x in (d.get("risks") or []) if x.get("level") in ("danger", "warn")),
                    buys=tx.get("buys", ""), sells=tx.get("sells", ""), m5=pc.get("m5", ""), h1=pc.get("h1", ""), run_pct=round(run * 100) if run is not None else "",
                    decision=decision, reason=reason, price0=q.get("priceUsd", ""), m1h="", m3h="", m6h="", tier=tier, qscore=qscore,
-                   src=src or _SRC.get(ca) or ("gt_new_pools" if tier == "early" else "")))
+                   src=src or _SRC.get(ca) or ("gt_new_pools" if tier == "early" else ""), **rc_features(d)))
     cand_save(rs)
 
 def mark_candidate(ca, decision):

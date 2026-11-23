@@ -435,3 +435,23 @@ def test_outcome_summary_shows_near_misses_by_filter_and_by_source():
     out = bot.outcome_summary()
     assert "weak buy ratio: 2 coins" in out and "50% above 1.0x" in out
     assert "By data source:" in out and "gt_trending: 2 coins" in out and "dex_boost: 1 coins" in out
+
+
+# ---------- extra RugCheck features logged with every candidate ----------
+def test_rc_features_exclude_pool_accounts_and_read_creator_and_lp():
+    d = {"knownAccounts": {"POOL": {"name": "Raydium", "type": "AMM"}}, "graphInsidersDetected": 2, "creatorTokens": [{}, {}, {}], "totalLPProviders": 0, "deployPlatform": "pump.fun",
+         "topHolders": [{"address": "POOL", "pct": 40}, {"address": "A", "pct": 12.5}, {"address": "B", "pct": 7.5}, {"address": "C", "pct": 5}],
+         "markets": [{"lp": {"lpLockedPct": 0}}, {"lp": {"lpLockedPct": 99.5}}]}
+    f = bot.rc_features(d)
+    assert f["top1"] == 12.5 and f["top10"] == 25.0 and f["insiders"] == 2 and f["creator_prior"] == 3
+    assert f["lp_locked"] == 99.5 and f["lp_providers"] == 0 and f["launchpad"] == "pump.fun"
+
+def test_rc_features_never_raise_on_odd_reports():
+    for d in ({}, {"topHolders": None}, {"topHolders": [{"pct": "x"}]}, {"markets": [{"lp": None}]}, {"creatorTokens": "n/a"}):
+        f = bot.rc_features(d); assert set(f) == {"top1", "top10", "insiders", "creator_prior", "lp_locked", "lp_providers", "launchpad"}
+
+def test_candidate_log_stores_the_new_features(monkeypatch):
+    monkeypatch.setitem(bot.RC_LAST, "CAF", {"totalHolders": 500, "score_normalised": 5, "risks": [], "topHolders": [{"address": "A", "pct": 9}], "graphInsidersDetected": 1})
+    bot.log_candidate("CAF", good_pair(baseToken={"address": "CAF", "symbol": "F", "name": "f"}), 600, None, "blocked", "x", tier="normal")
+    r = [x for x in bot.cand_rows() if x["ca"] == "CAF"][0]
+    assert r["top1"] == "9.0" and r["insiders"] == "1" and r["holders"] == "500"
