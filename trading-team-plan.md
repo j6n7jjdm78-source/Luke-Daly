@@ -3,7 +3,7 @@
 Built from the 5 interview answers. Status: PLAN ONLY. Nothing is connected, no keys exist, no orders can be placed.
 
 ## Your answers
-1. Markets: Gold (XAUUSD) and BTC (BTCUSD). Timeframes: 5m, 15m, 1h. Style: support and resistance.
+1. Markets: Gold (XAUUSD) only for now. BTC dropped: no BTCUSD symbol on the MetaQuotes demo (the "BTC" row is a different, stale instrument). Timeframes: 5m, 15m, 1h. Style: support and resistance.
 2. Goal: paper trading, 5 to 10 trades a day.
 3. Screen time: watching charts and drawing support/resistance levels.
 4. Account: EUR 100 paper. Risk per trade 3% (EUR 3). Goal 5% a day (EUR 5), treated as an aspiration, not a rule.
@@ -21,7 +21,7 @@ Built from the 5 interview answers. Status: PLAN ONLY. Nothing is connected, no 
 Pick: start with Scout (levels + scanning). It saves the most hours and cannot lose money. Execution comes last and stays on demo.
 
 ## Team (5 agents)
-1. **Scout** watches XAUUSD and BTCUSD on 5m/15m/1h, keeps a daily list of support/resistance levels, and flags touches, rejections and breaks that match the rules.
+1. **Scout** watches XAUUSD on 5m/15m/1h, keeps a daily list of support/resistance levels, and flags touches, rejections and breaks that match the rules.
 2. **Lab** backtests each rule on real data with spread, fees and slippage, and checks minimum lot size against EUR 3 risk.
 3. **Shield** checks size, stop, spread and daily limits on every order and can halt the bot.
 4. **Pilot** sends orders to the MT5 DEMO account only, after Shield approves.
@@ -31,13 +31,13 @@ Plus the **Coordinator**, the only agent you talk to.
 ## Agent cards
 
 ### Scout
-- Job: find support/resistance setups on gold and BTC.
+- Job: find support/resistance setups on gold.
 - Reads: price candles (5m, 15m, 1h) from the broker demo feed, with timestamps.
 - Outputs: today's level list; alerts "market, timeframe, level, setup type, entry idea, stop idea".
 - Runs: levels refreshed at 00:00 UTC and each new 1h close; scans every closed 5m bar.
 - Tools: MT5 data, TradingView alerts.
 - Never: places orders, moves levels mid-trade, or uses data without a timestamp.
-- Prompt: "You are Scout. Every day mark the strongest support and resistance levels for XAUUSD and BTCUSD from the 1h chart, then confirm them on 15m. On each closed 5m bar, check whether price touched a level and rejected it or broke it with a close beyond it. Send one alert per setup with market, level, direction, suggested stop beyond the level, and the reason. Use only real candle data with timestamps. Never place or change orders. If data is missing or stale, say so and stop alerting."
+- Prompt: "You are Scout. Every day mark the strongest support and resistance levels for XAUUSD from the 1h chart, then confirm them on 15m. On each closed 5m bar, check whether price touched a level and rejected it or broke it with a close beyond it. Send one alert per setup with market, level, direction, suggested stop beyond the level, and the reason. Use only real candle data with timestamps. Never place or change orders. If data is missing or stale, say so and stop alerting."
 
 ### Lab
 - Job: prove or reject each rule before it trades.
@@ -83,7 +83,7 @@ Plus the **Coordinator**, the only agent you talk to.
 ## Config (plain English; edit values here)
 ```
 mode: PAPER (demo account only)
-markets: XAUUSD, BTCUSD
+markets: XAUUSD
 timeframes: 5m, 15m, 1h
 account_size_eur: 100
 risk_per_trade: 3%          # EUR 3 at start
