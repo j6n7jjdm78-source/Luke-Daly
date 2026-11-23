@@ -197,10 +197,14 @@ Ed8EZc1oZWTCntPfig7vHLNiusW6aqMgvWEdbVcsVSW,KOOP,2026-11-23T20:28:07+00:00,60,14
 7ZCm8WBN9aLa3o47SoYctU6iLdj7wkGG5SV2hE5CgtD5,ELON,2026-11-23T20:52:57+00:00,1091,114937,47643,27713,72,Mint Authority still enabled|Single holder ownership|High holder concentration|Missing file metadata|Mutable metadata,77,94,-0.14,-0.29,,alert,narrative:Elon Musk,0.00000001597,0.99,,,narrative,,news:Elon Musk
 CEUYEJqig2nJShp47ga4ou3Eyrs2JwYtTnMAzXR6XY5P,NVIDIA,2026-11-23T20:52:57+00:00,2,23796,39201,224,55,Large Amount of LP Unlocked|Low Liquidity|Low amount of LP Providers,378,89,47.12,47.12,,alert,narrative:Jensen Huang,0.00002379,0.0,,,narrative,,news:Jensen Huang
 DrJjCnagFhVKNuc8Fe8HejkY4aZaaCqy7WivdwdVpump,JENSEN,2026-11-23T21:20:26+00:00,63,115208,23558,,,,1442,926,2.66,57.54,,nearmiss,liq<$25k,0.0001174,1.46,,,normal,,dex_profile
-8WW5B189mPntQQ85HTPvQNsYxXhQbAhdjXvZ6qaapump,ChristmASS,2026-11-23T21:34:27+00:00,71,247118,35410,,,,7501,2285,1.42,356,,nearmiss,1h move out of range,0.0002497,,,,normal,,dex_profile
-6jrb9NxTa7PHv6PWHaF5mo3ETgeFNJj7oLKzA4jFpump,SANTACAT,2026-11-23T21:35:27+00:00,395,20327,9152,,,,205,77,12.5,28.4,,nearmiss,liq<$25k,0.00002116,,,,normal,,dex_boost
-E9rWKjVhHMxQkxfREr7Li8Yy46rVcWiWHoKVQAe9pump,MINELIUS,2026-11-23T21:36:11+00:00,1446,121174,25883,,,,2969,2473,1.5,23.83,,nearmiss,wash volume,0.0001216,,,,normal,,dex_top_boost
-FztWN8TPyZfy47NkPKoUA5WEzvU1arQHBrjnHHDRpump,CLIPINU,2026-11-23T21:54:17+00:00,64,149053,27731,,,,20874,9484,-7.13,447,,nearmiss,1h move out of range,0.0001559,,,,normal,,gt_trending
-9Gu5JYt4Pas6cW4S6qtyFkDucFj6GMtpJiDC9sQbpump,FOMOMAS,2026-11-23T21:56:01+00:00,63,56683,19384,,,,248,158,-6.32,42.05,,nearmiss,liq<$25k,0.00005909,,,,normal,,dex_profile
+8WW5B189mPntQQ85HTPvQNsYxXhQbAhdjXvZ6qaapump,ChristmASS,2026-11-23T21:34:27+00:00,71,247118,35410,,,,7501,2285,1.42,356,,nearmiss,1h move out of range,0.0002497,0.01,,,normal,,dex_profile
+6jrb9NxTa7PHv6PWHaF5mo3ETgeFNJj7oLKzA4jFpump,SANTACAT,2026-11-23T21:35:27+00:00,395,20327,9152,,,,205,77,12.5,28.4,,nearmiss,liq<$25k,0.00002116,0.85,,,normal,,dex_boost
+E9rWKjVhHMxQkxfREr7Li8Yy46rVcWiWHoKVQAe9pump,MINELIUS,2026-11-23T21:36:11+00:00,1446,121174,25883,,,,2969,2473,1.5,23.83,,nearmiss,wash volume,0.0001216,0.03,,,normal,,dex_top_boost
+FztWN8TPyZfy47NkPKoUA5WEzvU1arQHBrjnHHDRpump,CLIPINU,2026-11-23T21:54:17+00:00,64,149053,27731,,,,20874,9484,-7.13,447,,nearmiss,1h move out of range,0.0001559,0.01,,,normal,,gt_trending
+9Gu5JYt4Pas6cW4S6qtyFkDucFj6GMtpJiDC9sQbpump,FOMOMAS,2026-11-23T21:56:01+00:00,63,56683,19384,,,,248,158,-6.32,42.05,,nearmiss,liq<$25k,0.00005909,1.03,,,normal,,dex_profile
 38M2z4UCfZEkUHFzD48vhKQhFhNyRGto8pZbLjNipump,JIMMY,2026-11-23T22:21:46+00:00,71,210442,34178,,,,4295,3165,16.46,302,,nearmiss,1h move out of range,0.0002253,,,,normal,,dex_profile
 9o7AWEtvSSZTHHjam9fcj2xQLgDgL8V3be6zcM66unx4,MOTES,2026-11-23T22:26:01+00:00,90,122108,216345,,,,6803,4911,1.71,22.98,,nearmiss,wash volume,0.0001221,,,,normal,,gt_trending
+62QTa8TvNAoUz62V93hgdBkwJfYWQLcQ8qVMA9UPpump,PONK,2026-11-23T22:46:04+00:00,61,138663,25887,2545,1,,6520,1236,64.58,13.15,,blocked,already 32% off its 1-hour high (dumping),0.0001401,,,,normal,78,dex_profile
+Gg4H3vNtAcWATHBJ4wWT1YPDdkYgBgARhaWUgMdnpump,NVINU,2026-11-23T22:49:29+00:00,62,146337,26706,,,,19653,2626,-0.66,-49.48,,nearmiss,1h move out of range,0.0001471,,,,normal,,dex_profile
+488SaFq6wHF2z2k6NLSD3PtoSkXDNZaPkJwxze11pump,MOMO,2026-11-23T22:50:43+00:00,150648,270774,62529,,,,2797,1727,-4.33,-4.33,,nearmiss,age out of range,0.0002939,,,,normal,,gt_trending
+pmaiYB9pq28FtYf5bH2WALuSWEvG8u6tF5m8fFNLhtK,NVIDIA,2026-11-23T22:58:22+00:00,8,44380,53209,763,52,Large Amount of LP Unlocked|Low amount of LP Providers,2538,785,32.11,178,,alert,narrative:Jensen Huang,0.00004438,,,,narrative,,news:Jensen Huang
