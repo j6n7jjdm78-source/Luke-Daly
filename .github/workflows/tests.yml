@@ -15,4 +15,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pytest
-      - run: python -m pytest tests/test_cliperz_bot.py tests/test_watchdog.py -q
+      - run: python -m pytest tests/test_cliperz_bot.py tests/test_watchdog.py tests/test_narrative.py tests/test_backtest.py -q

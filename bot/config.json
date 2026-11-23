@@ -84,5 +84,41 @@
   "circuit_breaker_rugs": 2,
   "min_score": 40,
   "max_dump_from_high_pct": 25,
-  "confirm_seconds": 100
+  "confirm_seconds": 100,
+  "narrative_enabled": true,
+  "narrative_entities": {
+    "Elon Musk": [
+      "elon",
+      "musk"
+    ],
+    "Donald Trump": [
+      "trump"
+    ],
+    "Jensen Huang": [
+      "jensen",
+      "nvidia"
+    ],
+    "Sam Altman": [
+      "altman"
+    ],
+    "Vitalik Buterin": [
+      "vitalik"
+    ],
+    "Michael Saylor": [
+      "saylor"
+    ],
+    "Brian Armstrong": [
+      "armstrong"
+    ],
+    "Mark Zuckerberg": [
+      "zuckerberg",
+      "zuck"
+    ],
+    "Warren Buffett": [
+      "buffett"
+    ],
+    "Tim Cook": [
+      "timcook"
+    ]
+  }
 }

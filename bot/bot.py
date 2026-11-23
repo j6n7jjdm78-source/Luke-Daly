@@ -23,6 +23,16 @@ def http(url, data=None, headers=None, method=None):
             if attempt == 2: raise
             time.sleep(2 * (attempt + 1))
 
+def http_text(url, headers=None):
+    """GET returning text (for RSS feeds). Same retry behaviour as http()."""
+    req = r.Request(url, None, {"User-Agent": "Mozilla/5.0 (compatible; cliperz-bot/1.0)", **(headers or {})})
+    for attempt in range(3):
+        try: return r.urlopen(req, timeout=20).read().decode("utf-8", "replace")
+        except urllib.error.HTTPError: raise
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+            if attempt == 2: raise
+            time.sleep(2 * (attempt + 1))
+
 def token():
     """Current X access token. The refresh time is stored INSIDE the login file ("obtained_at") so it survives being copied to another machine
     (file timestamps do not); the file timestamp is only a fallback for older files."""
@@ -427,18 +437,18 @@ def early_safety(ca):
     v = safety_rc(ca, min_holders=E["min_holders"], max_score=E["max_score"])
     return v if v is not None else (False, "no RugCheck report yet", "")
 
-_GT_LOCK = threading.Lock(); _GT_LAST = [0.0]; _GT_COOL = [0.0]; GT_STATS = [0, 0]   # [requests, rate-limited (429) answers], printed in the [TIMING] line
+_GT_LOCK = threading.Lock(); _GT_LAST = [0.0]; _GT_COOL = [0.0]; GT_STATS = [0, 0]; GT_SPACING = 1.2     # seconds between GeckoTerminal request starts (bulk jobs raise this)   # [requests, rate-limited (429) answers], printed in the [TIMING] line
 def gt_get(url, tries=4):
     """GeckoTerminal GET: starts are spaced ~1.2 s apart across all threads (free limit ~30/min), and it waits and retries when rate limited (HTTP 429)."""
     for i in range(tries):
         with _GT_LOCK:
-            wait = max(1.2 - (time.time() - _GT_LAST[0]), _GT_COOL[0] - time.time())     # spacing, plus a shared pause after any 429
+            wait = max(GT_SPACING - (time.time() - _GT_LAST[0]), _GT_COOL[0] - time.time())     # spacing, plus a shared pause after any 429
             if wait > 0: time.sleep(wait)
             _GT_LAST[0] = time.time(); GT_STATS[0] += 1
         try: return http(url)
         except Exception as e:
             if getattr(e, "code", None) == 429: GT_STATS[1] += 1
-            if getattr(e, "code", None) == 429 and i < tries - 1: _GT_COOL[0] = time.time() + 6 * (i + 1); continue    # all threads pause, none sleeps alone
+            if getattr(e, "code", None) == 429 and i < tries - 1: _GT_COOL[0] = time.time() + max(6, GT_SPACING * 4) * (i + 1); continue    # all threads pause, none sleeps alone
             raise
 
 CAND_FIELDS = "ca,symbol,eval_utc,age_m,mcap,liq,holders,score,flags,buys,sells,m5,h1,run_pct,decision,reason,price0,m1h,m3h,m6h,tier,qscore,src".split(",")
@@ -454,7 +464,11 @@ def cand_save(rs):
 def log_candidate(ca, q, age_m, run, decision, reason, tier="early", qscore="", src=""):
     """Record a coin the first time it reaches the safety stage, with the features we may want to learn from. Outcomes are filled in later."""
     rs = cand_rows()
-    if any(x["ca"] == ca for x in rs): return
+    old = [x for x in rs if x["ca"] == ca]
+    if old:      # already logged: keep the first record, but remember that a news alert also flagged this coin
+        if tier == "narrative" and not str(old[0].get("src") or "").startswith("news:") and not old[0].get("reason", "").startswith("also narrative"):
+            old[0]["reason"] = f"also narrative: {reason} | {old[0].get('reason') or ''}"[:200]; cand_save(rs)
+        return
     d = RC_LAST.get(ca) or {}; tx = (q.get("txns") or {}).get("h1", {}); pc = q.get("priceChange") or {}
     rs.append(dict(ca=ca, symbol=q["baseToken"]["symbol"], eval_utc=now.isoformat(timespec="seconds"), age_m=round(age_m), mcap=round(q.get("marketCap") or 0),
                    liq=round((q.get("liquidity") or {}).get("usd", 0)), holders=d.get("totalHolders", ""), score=d.get("score_normalised", ""),
@@ -929,6 +943,45 @@ def mk_quote_draft():
     return f"q{x['id']}", f"https://x.com/{CFG.get('handle', 'Cliperzcoins711')}/status/{x['tweet_id']}", \
         f"${x['token']}: called at {fmt(c0)}, peaked at {fmt(pkm)} = {pk:.1f}x after our post. Peak, not a promise. We check safety before every call. NFA"
 
+def narrative_radar(every=600, per_entity_hours=2, per_coin_hours=6):
+    """News-driven alerts, PRIVATE DM ONLY (nothing is posted publicly). Every ~10 minutes: for each watched name, read fresh Google News headlines;
+    when several publishers ran the story in the last hours, look for Solana coins carrying the name, group clones, check safety and the 1-hour chart,
+    and DM the owner with headlines, the best coin, clone count and red flags. Each alerted coin is also logged as a shadow candidate (tier
+    'narrative') so its later peak is tracked and we can measure whether following news would have paid."""
+    if DRY or not CFG.get("narrative_enabled", True): return
+    mark = f"{STATE}/nr-run"; os.makedirs(STATE, exist_ok=True)
+    if os.path.exists(mark) and time.time() - os.path.getmtime(mark) < every: return
+    open(mark, "w").close()
+    import narrative
+    try: seen = json.load(open(f"{STATE}/nr_seen.json"))
+    except Exception: seen = {}
+    t_now = time.time(); seen = {k: v for k, v in seen.items() if t_now - v < 86400}
+    for entity, aliases in (CFG.get("narrative_entities") or {}).items():
+        try:
+            items = narrative.parse_rss(http_text("https://news.google.com/rss/search?q=" + u.quote(f'"{entity}" when:1d') + "&hl=en-US&gl=US&ceid=US:en"))
+            if not narrative.is_hot(items, now): continue
+            if t_now - seen.get(f"e:{entity}", 0) < per_entity_hours * 3600: continue
+            pairs = []
+            for a in aliases[:2]:
+                try: pairs += http("https://api.dexscreener.com/latest/dex/search?q=" + u.quote(a)).get("pairs") or []
+                except Exception: pass
+            coins = [(c, n) for c, n in narrative.best_coins(pairs, aliases, now.timestamp() * 1000) if t_now - seen.get(f"c:{c['ca']}", 0) > per_coin_hours * 3600]
+            if not coins: continue
+            verdicts = {}
+            for c, _ in coins:
+                v = safety_rc(c["ca"], min_holders=50, max_score=30)
+                verdicts[c["ca"]] = "no RugCheck report yet" if v is None else (("passes the RugCheck gate: " + v[2]) if v[0] else "BLOCKED: " + v[1])
+                oh = off_high(c["pair"])
+                if oh is not None: verdicts[c["ca"]] += f"; price is {100 * oh:.0f}% of its 1-hour high"
+                seen[f"c:{c['ca']}"] = t_now
+                try: log_candidate(c["ca"], c["pair"], c["age_h"] * 60, None, "alert", f"narrative:{entity}", tier="narrative", src=f"news:{entity}")
+                except Exception: pass
+            seen[f"e:{entity}"] = t_now
+            owner_msg(narrative.format_alert(entity, items, coins, now, verdicts))
+        except Exception as e:
+            print(f"[WARN] narrative radar failed for {entity} ({type(e).__name__}: {str(e)[:80]})")
+    json.dump(seen, open(f"{STATE}/nr_seen.json", "w"))
+
 def marketing_drafts(hours=(12, 18)):
     """Twice a day: up to 3 reply drafts and 1 quote draft, sent privately to the owner. With buttons on, each draft arrives as its own message
     with [Post this] / [Skip]; the post is only made when the owner taps. Without buttons it is one plain DM to copy from."""
@@ -975,7 +1028,7 @@ if __name__ == "__main__":
     if os.environ.get("GITHUB_ACTIONS") != "true" and not DRY and os.environ.get("CLIPERZ_ALLOW_LOCAL") != "1":
         sys.exit("Only the GitHub Actions run may post (a second copy would fight it over the single-use X login). See RUNBOOK.md; set CLIPERZ_ALLOW_LOCAL=1 only when moving to a private server.")
     t_all = time.time(); times = {}
-    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, telegram_actions, marketing_drafts, weekly_analysis, scan_digest):   # one failing stage must not skip the rest
+    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, telegram_actions, marketing_drafts, narrative_radar, weekly_analysis, scan_digest):   # one failing stage must not skip the rest
         t0 = time.time()
         try: stage()
         except Exception as e: print(f"[WARN] {stage.__name__} failed this cycle: {type(e).__name__}: {str(e)[:100]}")
