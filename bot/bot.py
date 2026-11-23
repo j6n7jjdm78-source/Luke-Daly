@@ -1,7 +1,7 @@
 """Meme coin call-out bot. Run every ~10 min via cron/launchd: python3 bot/bot.py
 Env: X_CLIENT_ID, X_CLIENT_SECRET. Needs tokens.json from auth.py.
 Create a file named STOP in repo root to halt all posting."""
-import os, sys, csv, json, time, base64, datetime as dt, statistics as st
+import os, re, sys, csv, json, time, base64, datetime as dt, statistics as st
 import urllib.parse as u, urllib.request as r, urllib.error
 import cliperz_keys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -77,6 +77,15 @@ def owner_msg(text):
         http(base + "sendMessage", json.dumps({"chat_id": oid, "text": text[:3900], "disable_web_page_preview": True}).encode(), {"Content-Type": "application/json"})
     except Exception:
         pass
+
+def owner_alert(key, text, every=3600):
+    """Private alert that repeats at most once per `every` seconds for the same key, so a problem that persists cannot flood the owner's chat."""
+    try:
+        os.makedirs(STATE, exist_ok=True); mark = f"{STATE}/alert-{re.sub('[^A-Za-z0-9]', '_', key)[:60]}"
+        if os.path.exists(mark) and time.time() - os.path.getmtime(mark) < every: return
+        open(mark, "w").close()
+    except Exception: pass
+    owner_msg(text)
 
 def tg_send(text, image=None, tweet_id=None):
     """Mirrors a post to the Telegram channel. Never raises: a Telegram problem must not affect X posting."""
@@ -254,7 +263,7 @@ def publish_call(q, mc, liq, text, tier=""):
                        env={**os.environ, "CARD_TAG": "EARLY CALL" if tier == "EARLY" else "CALL"})
         media = "dry-media" if DRY else upload_image(png)
     except Exception as e:
-        print(f"[SKIP] could not make/upload the card ({e!r}); not posting a text-only call"); owner_msg(f"⚠️ Could not make/upload the card for ${sym}; call NOT posted. Will retry next cycle."); return
+        print(f"[SKIP] could not make/upload the card ({e!r}); not posting a text-only call"); owner_alert(f"card-{sym}", f"⚠️ Could not make/upload the card for ${sym}; call NOT posted (retrying every cycle, this alert repeats at most hourly). Cause: {e!r}"); return
     tid = post(text, media=media, image=png)
     rs.append(dict(id=n, token=sym, chain=CFG["chain"], contract=ca, called_at_utc=now.isoformat(), mcap_at_call=mc,
                    tweet_id=tid, status="open", current_mcap=mc, multiple=1.0, notes=tier))
