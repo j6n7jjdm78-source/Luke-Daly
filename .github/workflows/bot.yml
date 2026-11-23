@@ -32,6 +32,9 @@ jobs:
       TOKEN_KEY: ${{ secrets.CLIPERZ_TOKEN_KEY }}
     steps:
       - uses: actions/checkout@v4
+      - name: Use the latest main (a dispatched run is pinned to an older commit)
+        if: ${{ github.ref == 'refs/heads/main' }}
+        run: git fetch -q origin main && git reset -q --hard origin/main && git log --oneline -1
       - name: Check secrets (prints only set / MISSING)
         run: |
           for v in X_CLIENT_ID X_CLIENT_SECRET TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID TELEGRAM_OWNER_CHAT_ID TOKEN_KEY; do
@@ -68,6 +71,7 @@ jobs:
           mkdir -p ~/.config/cliperz-bot && chmod 700 ~/.config/cliperz-bot
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:TOKEN_KEY -in state/tokens.enc -out ~/.config/cliperz-bot/tokens.json
           chmod 600 ~/.config/cliperz-bot/tokens.json
+          sha256sum ~/.config/cliperz-bot/tokens.json | cut -d' ' -f1 > ~/.config/cliperz-bot/tokens.start.sha   # lets the save step tell whether THIS run refreshed the login
       - name: Run the bot back to back for ~45 minutes
         if: ${{ github.event.inputs.mode != 'check' && github.event.inputs.mode != 'test' }}
         run: |
