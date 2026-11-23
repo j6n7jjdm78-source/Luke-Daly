@@ -124,3 +124,16 @@ Duplicate orders, missed stop, wrong position size, stale price feed, API timeou
 | TradingView to MT5 needs a third-party bridge, and MT5 needs a Windows machine or VPS to run 24/7 | Choose the bridge/VPS on day 1; test restarts |
 | AgenKit is an outside tool I cannot verify from here | Check it works as described before relying on it; the agent cards work in any agent builder |
 | Demo fills are better than live fills | Treat paper results as optimistic until live-like slippage is modelled |
+
+## XAUUSD demo specs (from MT5 screenshots)
+- Spread seen: 15 points (bid 3629.66 / ask 3629.81), about $0.15.
+- Minimum volume 0.01, volume step 0.01, maximum 100. Profit currency USD.
+- Execution: Market. Filling: Fill or Kill, Immediate or Cancel (Pilot must pick one of these).
+- Swap (points): long -12.6, short -4.6; Wednesday charges triple. Avoid holding overnight.
+- NOT YET CONFIRMED: contract size (assumed 100 oz per lot, so 0.01 lot = 1 oz) and account leverage.
+
+## Risk math with these specs (assumptions flagged)
+- 0.01 lot = 1 oz, so a $1 move = $1. EUR 3 risk is about $3.5 (check the live EUR/USD rate).
+- Smallest possible position therefore allows a stop of about $3.5 (350 points). Wider stop = Shield BLOCKS (cannot size down below 0.01).
+- Spread of $0.15 is about 4% of a $3.5 stop, paid on every trade.
+- Margin for 1 oz at ~3630 is about $36 at 1:100 leverage, about $121 at 1:30 (more than EUR 100). Leverage must be 1:100 or higher on the demo.
