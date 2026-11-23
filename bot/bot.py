@@ -615,6 +615,16 @@ def daily_recap(hour=21):
         print(f"[SKIP] recap picture failed ({e!r})"); os.remove(f"{STATE}/recap-{now.date()}"); return
     post(f"Daily recap 📊\n{len(rs)} calls in the last 24h. Best peaks shown, labeled as peaks (not current prices).\nCommunity: {CFG.get('community_link', '')}"[:280], media=media, image=png)
 
+def scan_digest(every=1200):
+    """Private Telegram DM to the owner with a short scan summary, at most once every 20 minutes (the cloud copy needs this as well as the local one)."""
+    if DRY: return
+    mark = f"{STATE}/scan-digest"; os.makedirs(STATE, exist_ok=True)
+    if os.path.exists(mark) and time.time() - os.path.getmtime(mark) < every: return
+    open(mark, "w").close()
+    import subprocess
+    out = subprocess.run([sys.executable, f"{ROOT}/bot/scan_report.py"], capture_output=True, text=True, timeout=150).stdout.strip()
+    if out: owner_msg("🔎 " + out)
+
 def daily_growth(hour=16):
     """Once a day, private DM only: follower/post counts plus up to 4 ready-to-paste reply drafts for coins people are talking about
     right now (they pass our scanner filters and the RugCheck gate). The owner pastes them by hand under other people's posts.
@@ -643,6 +653,6 @@ def daily_growth(hour=16):
 
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
-    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth):   # one failing stage must not skip the rest
+    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, scan_digest):   # one failing stage must not skip the rest
         try: stage()
         except Exception as e: print(f"[WARN] {stage.__name__} failed this cycle: {type(e).__name__}: {str(e)[:100]}")
