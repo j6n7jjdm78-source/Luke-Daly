@@ -1,7 +1,7 @@
 """Run: python -m scanner.main [--once] [--tf 15m] [--source public|mt5] [--test] [--chat-id]"""
 import argparse, json, os, time
 import pandas as pd
-from .config import Settings, get_symbol
+from .config import Settings, get_symbol, is_open
 from .data import make_source, TF_MINUTES
 from .strategy import evaluate, make_signal
 from . import notify, tracker
@@ -137,6 +137,9 @@ def main():
         tracker.run(st, src, s)
         save_state(st)
         for sym in s.symbols:
+            if not is_open(sym, pd.Timestamp.now(tz="UTC")):
+                print(f"{sym.name}: market closed")
+                continue
             try:
                 df, htf = src.candles(sym, s.timeframe), src.candles(sym, s.htf)
                 sig = evaluate(sym.name, df, htf, a.min_touches, ltf_min=TF_MINUTES[s.timeframe],

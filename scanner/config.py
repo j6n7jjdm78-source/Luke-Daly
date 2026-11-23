@@ -25,17 +25,34 @@ class Symbol:
     wick: float = 0.25        # min rejection wick as a share of the candle range
     need_4h: bool = False     # also require the 4h trend to agree
     session: tuple = None     # (start_hour, end_hour) UTC window for new signals, None = any time
+    enabled: bool = True      # False: never scan for new signals (open trades are still followed)
+    weekend_closed: bool = False  # True: market is shut from Friday 22:00 UTC to Sunday 22:00 UTC
 
 
 SYMBOLS = [
     # GOLD: 50-pip layout (pip = 0.10): SL 5.0 beyond the zone, TP1-TP3 5.0 apart, TP4 = Hold
     Symbol("GOLD", mt5="XAUUSD", yahoo="GC=F", label="GOLD", style="gold", pip=0.10, decimals=0,
            pct=False, sl=5.0, tp1=5.0, step=5.0, zone_cap=10.0, run=2.5, be_after=1,
-           need_4h=True),   # 4h trend must agree; stop moves to entry after TP1
+           need_4h=True, weekend_closed=True),   # 4h trend must agree; stop moves to entry after TP1
     # BTC / ETH: wider levels as a share of price (scaled from the Grand Pips BTC example)
     Symbol("BTC", mt5="BTCUSD", binance="BTCUSDT", kraken="XBTUSD", label="BTCUSD", style="btc", pip=10.0, decimals=0),
-    Symbol("ETH", mt5="ETHUSD", binance="ETHUSDT", kraken="ETHUSD", label="ETHUSD", style="btc", pip=1.0, decimals=1),
+    Symbol("ETH", mt5="ETHUSD", binance="ETHUSDT", kraken="ETHUSD", label="ETHUSD", style="btc", pip=1.0, decimals=1, enabled=False),   # switched off: BTC and gold only
 ]
+
+
+def is_open(sym, now):
+    """True when the market for `sym` is trading at `now` (a UTC timestamp). Crypto never closes;
+    gold is closed from Friday 22:00 UTC until Sunday 22:00 UTC."""
+    if not sym.weekend_closed:
+        return True
+    wd, h = now.weekday(), now.hour          # Monday = 0 ... Sunday = 6
+    if wd == 5:
+        return False
+    if wd == 4 and h >= 22:
+        return False
+    if wd == 6 and h < 22:
+        return False
+    return True
 
 
 def get_symbol(name):
@@ -54,4 +71,4 @@ class Settings:
     telegram_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat: str = os.getenv("TELEGRAM_CHAT_ID", "")
     log_file: str = "signals.csv"
-    symbols: list = field(default_factory=lambda: SYMBOLS)
+    symbols: list = field(default_factory=lambda: [x for x in SYMBOLS if x.enabled])

@@ -217,3 +217,51 @@ def test_every_pip_number_is_calculated_from_the_called_price():
         tp_msgs = [e for e in ev if e.startswith("HIT TP")]
         for k, msg in enumerate(tp_msgs):
             assert f"+{round(abs(sig.tps[k] - price) / sym.pip)}PIPS" in msg.split("\n")[0], (name, msg)
+
+
+def test_gold_market_hours_and_crypto_always_open():
+    from scanner.config import get_symbol, is_open
+    g, b = get_symbol("GOLD"), get_symbol("BTC")
+    ts = lambda s: pd.Timestamp(s, tz="UTC")
+    # 2026-11-20 is a Friday
+    assert is_open(g, ts("2026-11-20 21:59")) and not is_open(g, ts("2026-11-20 22:00"))
+    assert not is_open(g, ts("2026-11-21 12:00"))                                   # Saturday
+    assert not is_open(g, ts("2026-11-22 21:59")) and is_open(g, ts("2026-11-22 22:00"))   # Sunday reopen
+    assert is_open(g, ts("2026-11-23 10:00"))                                       # Monday
+    assert all(is_open(b, ts(x)) for x in ("2026-11-21 12:00", "2026-11-22 03:00", "2026-11-23 10:00"))
+
+
+def test_eth_is_switched_off_but_btc_and_gold_scanned():
+    from scanner.config import Settings
+    assert [s.name for s in Settings().symbols] == ["GOLD", "BTC"]
+
+
+def test_tracker_skips_closed_gold_but_follows_btc():
+    from scanner import tracker
+    from scanner.config import get_symbol
+    from scanner.strategy import make_signal
+    sat = pd.Timestamp.now(tz="UTC")
+    asked = []
+
+    class Src:
+        def candles(self, sym, tf):
+            asked.append(sym.name)
+            idx = pd.date_range(end=sat, periods=5, freq="5min")
+            return pd.DataFrame(dict(open=1.0, close=1.0, high=1.0, low=1.0), index=idx)
+
+    class S:
+        telegram_token = telegram_chat = ""; track_tf = "5m"
+
+    now = pd.Timestamp.now(tz="UTC")
+    gold = make_signal("GOLD", "BUY", 3567, 3573, 3574, now, 3, [], get_symbol("GOLD"))
+    btc = make_signal("BTC", "BUY", 56140, 56641, 56700, now, 3, [], get_symbol("BTC"))
+    st = {"open": [tracker.new_trade(gold, 1, 1), tracker.new_trade(btc, 2, None)]}
+    # force "closed" for gold by faking the clock through the symbol rule
+    import scanner.config as cfg
+    real = cfg.is_open
+    cfg.is_open = lambda sym, n: sym.name != "GOLD"
+    try:
+        tracker.run(st, Src(), S())
+    finally:
+        cfg.is_open = real
+    assert asked == ["BTC"]

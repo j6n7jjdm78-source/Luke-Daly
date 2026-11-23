@@ -60,7 +60,7 @@ def resolve(t, df, run_thr, tf_min=15):
 
 def run(state, src, settings):
     """Check every open trade; send updates; drop finished ones."""
-    from .config import get_symbol
+    from .config import get_symbol, is_open
     now = pd.Timestamp.now(tz="UTC")
     for t in state.get("open", []):
         if now - pd.Timestamp(t["bar_time"]) > MAX_AGE:
@@ -68,6 +68,8 @@ def run(state, src, settings):
             continue
         try:
             sym = get_symbol(t["name"])
+            if not is_open(sym, now):
+                continue                      # market shut (e.g. gold at the weekend): resume on reopen
             df = src.candles(sym, settings.track_tf).iloc[:-1]   # fine candles, drop the forming one
         except Exception as e:
             print(f"[warn] tracker {t['name']}: {e}")
