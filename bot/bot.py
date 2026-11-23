@@ -583,7 +583,11 @@ def track():
         # results show the PEAK multiple since the call (the most it could have gained), always labelled as a peak
         old_pk = float(x.get("peak_mcap") or 0)   # skip the slow chart-history lookup for coins far below their peak or call price (cannot be setting a new peak)
         far_below = _far_below(x, mc)
-        pk = max(old_pk, mc, 0 if far_below else (PEAKS.get(x["id"]) or 0))
+        ref = max(mc, float(x["mcap_at_call"]))
+        if old_pk > 100 * ref: old_pk = ref                         # an absurd stored peak (bad chart data): heal it
+        chart_pk = 0 if far_below else (PEAKS.get(x["id"]) or 0)
+        if chart_pk > 20 * ref: chart_pk = 0                         # ignore an absurd chart peak instead of storing it
+        pk = max(old_pk, mc, chart_pk)
         x["peak_mcap"] = round(pk); peak_mult = pk / float(x["mcap_at_call"])
         if peak_mult > 1000: continue
         hit = [m for m in CFG["result_milestones"] if peak_mult >= m]
@@ -609,7 +613,8 @@ def track():
 
 def peak_mult(x):
     """Best multiple a call reached after it was posted: highest recorded market cap (never lowered) over the market cap at the call."""
-    return max(float(x.get("peak_mcap") or 0), float(x.get("current_mcap") or 0)) / float(x["mcap_at_call"])
+    c0 = float(x["mcap_at_call"]); cur = float(x.get("current_mcap") or 0); r = max(float(x.get("peak_mcap") or 0), cur) / c0
+    return r if r <= 100 else max(cur, c0) / c0          # a peak over 100x is treated as bad data, so no board can show a garbage multiple
 
 def scoreboard():
     """Sunday leaderboard picture: the best PEAK multiples among the last 7 days of calls, i.e. what someone could have had by buying
@@ -757,10 +762,93 @@ def daily_growth(hour=16):
     body = "\n\n".join(f"{i+1}) {d}" for i, d in enumerate(drafts)) or "No coin passed the safety check for a reply draft today."
     owner_msg(f"{head}\n\nReply drafts to paste by hand under other people's call-outs (add value, no link-dropping):\n\n{body}")
 
+# ---------- Marketing agent: DRAFTS ONLY. It finds relevant posts and prepares reply/quote drafts and sends them privately to the owner.
+# It never posts, replies, quotes, follows or likes anything itself; the owner copies a draft and posts it by hand. ----------
+MK_QUERIES = ('(solana OR pumpfun OR "pump.fun") (rug OR rugged OR scam OR "is this safe" OR "how to check") -is:retweet lang:en',
+              '(solana memecoin OR "solana meme") (dyor OR "mint authority" OR liquidity OR holders) -is:retweet lang:en',
+              'solana ("new coin" OR "just launched" OR gem OR "ca:") -is:retweet lang:en')
+MK_BAD = re.compile(r"giveaway|airdrop|guarantee|100x|1000x|dm me|send me|whitelist|presale|financial advice|follow back|f4f", re.I)
+CA_RE = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
+MK_TIPS = ("30-second check before buying any meme coin: is mint authority revoked? freeze authority revoked? what share do the top 10 holders own? rugcheck.xyz shows all three for free. Can't answer them? Skip it. NFA",
+           "Most new coins that lose their liquidity do it in the first hours. Check that the LP is locked or burned before you size up. NFA",
+           "Volume can be faked. If a coin trades 20x its market cap in a day, that is often wash trading, not demand. DYOR",
+           "Rule of thumb: if the dev wallet and a few top holders own a big share of supply, the exit liquidity is you. Check the holders first.",
+           "Active mint authority means more supply can be printed at any moment. Revoked mint plus revoked freeze is the bare minimum, not a green light. NFA",
+           "A chart that only goes up in the first 30 minutes is a warning, not a signal: late buyers fund the early ones. NFA")
+
+def mk_seen():
+    try: return set(json.load(open(f"{STATE}/mk_seen.json")))
+    except Exception: return set()
+
+def mk_find_posts(n=3):
+    """Recent X posts where a short, useful reply fits: about rugs/safety/holders, or containing a Solana contract we can check. Skips scammy wording."""
+    q = MK_QUERIES[(now.hour // 6) % len(MK_QUERIES)]
+    d = http("https://api.x.com/2/tweets/search/recent?" + u.urlencode({"query": q, "max_results": 50, "tweet.fields": "created_at,public_metrics,author_id",
+             "expansions": "author_id", "user.fields": "username,public_metrics"}), headers={"Authorization": "Bearer " + token()})
+    users = {x["id"]: x for x in (d.get("includes") or {}).get("users", [])}; seen = mk_seen(); out = []
+    for t in d.get("data") or []:
+        us = users.get(t.get("author_id"))
+        if not us or us["username"].lower() == CFG.get("handle", "Cliperzcoins711").lower() or t["id"] in seen: continue
+        age_h = (now - dt.datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))).total_seconds() / 3600
+        fol = us["public_metrics"]["followers_count"]; pm = t["public_metrics"]
+        if age_h > 6 or not 150 <= fol <= 200000 or MK_BAD.search(t["text"]) or not name_ok(t["text"]): continue
+        out.append((pm["like_count"] + 2 * pm["reply_count"] + (3 if CA_RE.search(t["text"]) else 0), t, us))
+    return sorted(out, key=lambda x: -x[0])[:n]
+
+def mk_reply_text(t):
+    """A contract check when the post contains a Solana contract RugCheck knows, otherwise a short safety tip. Never a price call, never a link to us."""
+    m = CA_RE.search(t["text"])
+    if m:
+        ca = m.group(0); d = rugcheck(ca); q = pair(ca)
+        if not d or "risks" not in d: return None
+        sym = (q or {}).get("baseToken", {}).get("symbol") or (d.get("tokenMeta") or {}).get("symbol") or "this coin"
+        flags = list(dict.fromkeys(r.get("name") for r in (d.get("risks") or []) if r.get("level") in ("danger", "warn")))
+        txt = (f"Contract check on ${sym}: mint {'revoked' if not d.get('mintAuthority') else 'ACTIVE'}, freeze {'revoked' if not d.get('freezeAuthority') else 'ACTIVE'}, "
+               f"{int(d.get('totalHolders') or 0):,} holders, RugCheck flags: {', '.join(flags)[:80] if flags else 'none'}. Do your own checks. Not an endorsement. NFA")
+        return txt if xlen(txt) <= 280 else None
+    if re.search(r"rug|scam|safe|check|holders|mint|liquidity|dyor", t["text"], re.I): return MK_TIPS[int(t["id"]) % len(MK_TIPS)]
+    return None
+
+def mk_quote_draft():
+    """Quote-post draft of our best recent result (peak after our call, at least 1.5x) that has not been suggested yet."""
+    seen = mk_seen(); best = None
+    for x in rows():
+        try: pk = peak_mult(x)
+        except Exception: continue
+        if x["status"] == "rugged" or not str(x["tweet_id"]).isdigit() or f"q{x['id']}" in seen or pk < 1.5 or not name_ok(x["token"]): continue
+        if pk > 100: continue
+        if best is None or pk > best[0]: best = (pk, x)
+    if not best: return None
+    pk, x = best; c0 = float(x["mcap_at_call"]); pkm = pk * c0
+    return f"q{x['id']}", f"https://x.com/{CFG.get('handle', 'Cliperzcoins711')}/status/{x['tweet_id']}", \
+        f"${x['token']}: called at {fmt(c0)}, peaked at {fmt(pkm)} = {pk:.1f}x after our post. Peak, not a promise. We check safety before every call. NFA"
+
+def marketing_drafts(hours=(12, 18)):
+    """Twice a day: private DM with up to 3 reply drafts and 1 quote draft. Drafts only; the owner decides and posts."""
+    if DRY or now.hour not in hours or not _once_today(f"mk{now.hour}"): return
+    seen = mk_seen(); parts = []; used = set()
+    try:
+        for _, t, us in mk_find_posts(8):
+            txt = mk_reply_text(t)
+            m = CA_RE.search(t["text"])
+            if not txt or (m and m.group(0) in used): continue       # one draft per coin
+            if m: used.add(m.group(0))
+            snippet = t["text"].replace("\n", " ")[:140]
+            parts.append(f"REPLY to @{us['username']} ({us['public_metrics']['followers_count']:,} followers, {t['public_metrics']['like_count']} likes)\n"
+                         f"https://x.com/{us['username']}/status/{t['id']}\nTheir post: \"{snippet}\"\nDraft: {txt}")
+            seen.add(t["id"])
+            if len(parts) >= 3: break
+    except Exception as e: print(f"[WARN] marketing search failed ({type(e).__name__}: {str(e)[:80]})")
+    qd = mk_quote_draft()
+    if qd: seen.add(qd[0]); parts.append(f"QUOTE our own call-out (quote this post, paste the draft)\n{qd[1]}\nDraft: {qd[2]}")
+    if not parts: return
+    os.makedirs(STATE, exist_ok=True); json.dump(sorted(seen)[-400:], open(f"{STATE}/mk_seen.json", "w"))
+    owner_msg("📣 Marketing drafts. NOTHING was posted: copy what you like and post it from your own phone.\n\n" + "\n\n".join(parts))
+
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
     t_all = time.time(); times = {}
-    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, weekly_analysis, scan_digest):   # one failing stage must not skip the rest
+    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, marketing_drafts, weekly_analysis, scan_digest):   # one failing stage must not skip the rest
         t0 = time.time()
         try: stage()
         except Exception as e: print(f"[WARN] {stage.__name__} failed this cycle: {type(e).__name__}: {str(e)[:100]}")
