@@ -232,7 +232,8 @@ class Signer:
         sig = self.rpc.send(bytes(VersionedTransaction.populate(msg, [Signature.from_bytes(sig_bytes)])))
         volume = amount if side == "buy" else gain
         self.db.record_swap(tg, now, side, mint, volume, sig)
-        out = {"sig": sig, "confirmed": bool(self.rpc.confirm(sig)), "fee_lamports": fee}
+        out = {"sig": sig, "confirmed": bool(self.rpc.confirm(sig)), "fee_lamports": fee,
+               "est_tokens": post["tokens"][mint] - pre["tokens"][mint], "est_sol": gain}
         if side == "buy":
             self.db.add_fee(tg, now, side, mint, amount, fee, sig, True)
         else:
@@ -293,6 +294,12 @@ class SolanaRPC:
 
     def get_balance(self, pubkey): return int(self._call("getBalance", [pubkey, {"commitment": "confirmed"}])["value"])
     def get_blockhash(self): return self._call("getLatestBlockhash", [{"commitment": "finalized"}])["value"]["blockhash"]
+
+    def mint_info(self, mint):
+        v = self._call("getAccountInfo", [mint, {"encoding": "jsonParsed"}])["value"]
+        if not v: return None
+        i = v["data"]["parsed"]["info"]
+        return {"mint_authority": i.get("mintAuthority"), "freeze_authority": i.get("freezeAuthority")}
 
     def get_accounts(self, keys):
         return self._call("getMultipleAccounts", [keys, {"encoding": "jsonParsed", "commitment": "confirmed"}])["value"]

@@ -4,5 +4,16 @@
   "mainnet_enabled": false,
   "max_total_deposits_sol": 5,
   "fee_bps": 100,
-  "referrer_share_bps": 2500
+  "referrer_share_bps": 2500,
+  "slippage_bps": 500,
+  "min_liquidity_usd": 10000,
+  "buy_presets_sol": [
+    0.1,
+    0.5,
+    1
+  ],
+  "execution": {
+    "max_price_impact_pct": 8,
+    "max_roundtrip_loss_pct": 15
+  }
 }
