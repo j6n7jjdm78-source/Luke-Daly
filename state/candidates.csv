@@ -181,7 +181,7 @@ GH4QcE5sSbuxGvbwVytHnjRtWbizjsVRpe8NoEA6k49,CM,2026-11-23T07:39:06+00:00,5,58706
 2RBC7AYm4SiQmYRfUwZdW51Kd3JR8nonynahSEsqTqVK,Flap Card,2026-11-23T08:37:07+00:00,8,24358,35814,981,52,Large Amount of LP Unlocked|Low amount of LP Providers,2478,1376,19.67,85.24,43,blocked,RugCheck danger: Large Amount of LP Unlocked,0.00002435,0.0,0.0,0.0,early,,
 12di6mczDz7gFWFBXjMQpgZGi2AuByxphuBhnChYpump,Hack,2026-11-23T08:40:56+00:00,7,41112,13188,415,1,,465,245,5.91,37.63,26,posted,,0.00004111,0.03,0.03,0.03,early,,
 9AiHB952pXVrHuct9m3RKWoWv4LG52p58FYjMvUkpump,HOLD,2026-11-23T11:11:05+00:00,76,125767,25565,2570,1,,5201,3484,17.16,51.07,,posted,,0.0001290,0.07,0.08,0.04,normal,62,
-7R4MP6VX7n3RMNhL9zsk5Zu5ibZvwq8npUYnRq7epump,Singularity,2026-11-23T14:58:23+00:00,4012,295244,50919,11470,1,,818,588,3.88,-7.73,,posted,,0.0003106,1.08,0.8,,normal,58,
+7R4MP6VX7n3RMNhL9zsk5Zu5ibZvwq8npUYnRq7epump,Singularity,2026-11-23T14:58:23+00:00,4012,295244,50919,11470,1,,818,588,3.88,-7.73,,posted,,0.0003106,1.08,0.8,0.57,normal,58,
 BzPyyYCTmQNq2BcfQ4ANAvCYk54rnmQEXMFvFT8RhWMi,MCAT,2026-11-23T15:51:23+00:00,1354,288773,98595,7652,1,,1016,786,0.65,10.63,,pass,,0.0002887,0.69,0.79,,normal,84,
 FuKY3dk7QmpbDdQRjzbjB3G6PiCuqKNvN4dAWDpwpump,OpenIndex,2026-11-23T16:18:53+00:00,1369,270699,43210,6050,1,,276,193,4.64,-9.46,,pass,,0.0002833,1.07,0.86,,normal,56,
 4kFR6GDuAJRaqimh21uJhhfwPrGbFW34J6UXEWUhpump,HUANG,2026-11-23T17:34:30+00:00,60,140068,34521,3799,1,,17457,13468,1.69,19.17,,blocked,already 66% off its 1-hour high (dumping),0.0001414,1.07,0.27,,normal,63,
@@ -192,5 +192,7 @@ FryQiSLqU7NfPvpQJRiYrVuvRRW66uB4FLorrKmjpump,earball,2026-11-23T20:23:35+00:00,1
 9QT8K685Hrae4k11dhGXirdtpfAaimExtyfwt8cPpump,DIGS,2026-11-23T20:23:35+00:00,37911,221479,53659,,,,961,477,0.37,9.82,,nearmiss,age out of range,0.0002323,,,,normal,,gt_trending
 93uamrbDerKbUh8MSjNF1wDtxYvEUD1CS9BcHn1apump,PumpMeme,2026-11-23T20:24:21+00:00,900,494068,52014,,,,8771,3118,5.95,-9.28,,nearmiss,mcap out of $20-300k,0.0004954,,,,normal,,dex_top_boost
 7cFiqdT46zs7ooHWLFiLSaSQKLMibtokh9dBinsspump,UCASH,2026-11-23T20:24:21+00:00,1989,816631,75197,,,,9742,1052,-1.62,-9.57,,nearmiss,mcap out of $20-300k,0.0008196,,,,normal,,dex_top_boost
-HKiMA2mKQHU2cjfZ4Kbmru5GBGCauSNqPtpu8cfmpump,JENSEN,2026-11-23T20:25:22+00:00,156,1205476,82804,,,,6129,3117,6.93,-3.65,,nearmiss,mcap out of $20-300k,0.001210,,,,normal,,dex_boost
+HKiMA2mKQHU2cjfZ4Kbmru5GBGCauSNqPtpu8cfmpump,JENSEN,2026-11-23T20:25:22+00:00,156,1205476,82804,,,,6129,3117,6.93,-3.65,,nearmiss,also narrative: narrative:Jensen Huang | mcap out of $20-300k,0.001210,,,,normal,,dex_boost
 Ed8EZc1oZWTCntPfig7vHLNiusW6aqMgvWEdbVcsVSW,KOOP,2026-11-23T20:28:07+00:00,60,146358,244268,,,,10595,6626,1.88,53.17,,nearmiss,wash volume,0.0001463,,,,normal,,gt_trending
+7ZCm8WBN9aLa3o47SoYctU6iLdj7wkGG5SV2hE5CgtD5,ELON,2026-11-23T20:52:57+00:00,1091,114937,47643,27713,72,Mint Authority still enabled|Single holder ownership|High holder concentration|Missing file metadata|Mutable metadata,77,94,-0.14,-0.29,,alert,narrative:Elon Musk,0.00000001597,,,,narrative,,news:Elon Musk
+CEUYEJqig2nJShp47ga4ou3Eyrs2JwYtTnMAzXR6XY5P,NVIDIA,2026-11-23T20:52:57+00:00,2,23796,39201,224,55,Large Amount of LP Unlocked|Low Liquidity|Low amount of LP Providers,378,89,47.12,47.12,,alert,narrative:Jensen Huang,0.00002379,,,,narrative,,news:Jensen Huang
