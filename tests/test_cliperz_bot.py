@@ -15,6 +15,8 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(bot, "DRY", False)
     monkeypatch.setattr(bot, "owner_msg", lambda t: bot.SENT.append(t))
     bot.SENT = []
+    monkeypatch.setattr(bot.cliperz_keys, "optional", lambda name: None)      # no real keys: nothing can reach Telegram or X from a test
+    monkeypatch.setattr(bot, "tg_api", lambda *a, **k: pytest.fail("tests must not call Telegram"))
     yield
 
 
@@ -231,3 +233,143 @@ def test_save_state_leaves_a_reauthorized_login_alone_when_this_run_never_refres
     dec = sh("openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:TOKEN_KEY -in state/tokens.enc", check, {"TOKEN_KEY": "k"})
     assert json.loads(dec.stdout)["refresh_token"] == "FRESH"
     assert "1" in (check / "calls.csv").read_text().split()
+
+
+# ---------- GeckoTerminal trending list is cached for 5 minutes ----------
+def test_gt_trending_is_fetched_once_per_ttl(monkeypatch):
+    calls = []
+    def fake_gt(url):
+        calls.append(url)
+        return {"data": [{"relationships": {"base_token": {"data": {"id": "solana_TOKEN" + str(len(calls))}}}}]}
+    monkeypatch.setattr(bot, "gt_get", fake_gt)
+    first = bot.gt_trending(); n = len(calls)
+    assert n == 5 and len(first) == 5                       # 5 lists on the first call
+    assert bot.gt_trending() == first and len(calls) == n   # served from the cache: no new requests
+    assert len(bot.gt_trending(ttl=0)) == 5 and len(calls) == 2 * n    # expired cache fetches again
+
+def test_gt_trending_survives_a_total_gt_failure(monkeypatch):
+    def boom(url): raise RuntimeError("down")
+    monkeypatch.setattr(bot, "gt_get", boom)
+    assert bot.gt_trending() == []                          # never raises, never caches an empty list
+
+
+# ---------- one-tap approval of marketing drafts ----------
+OWNER = "555"
+
+def open_draft(did="abc", **kw):
+    d = dict(text="Draft reply text. NFA", reply_to="777", quote_id=None, state="open", t=time.time()); d.update(kw)
+    p = bot.mk_pending(); p[did] = d; bot.mk_pending_save(p)
+
+@pytest.fixture
+def poster(monkeypatch):
+    posted = []
+    monkeypatch.setattr(bot, "post", lambda text, **k: posted.append((text, k)) or "999")
+    return posted
+
+def test_only_the_owners_tap_can_post(poster):
+    open_draft()
+    assert bot.mk_handle_tap("mk:post:abc", 12345, OWNER) is None and poster == []        # a stranger is ignored completely
+    assert bot.mk_pending()["abc"]["state"] == "open"
+
+def test_owner_tap_posts_the_stored_draft_exactly_once(poster):
+    open_draft()
+    ans = bot.mk_handle_tap("mk:post:abc", 555, OWNER)
+    assert ans.startswith("✅ Posted") and "/status/999" in ans
+    assert poster == [("Draft reply text. NFA", {"reply_to": "777", "quote_id": None, "mirror": False})]
+    assert "Already handled" in bot.mk_handle_tap("mk:post:abc", 555, OWNER) and len(poster) == 1     # a second tap does nothing
+
+def test_a_tap_cannot_change_what_is_posted(poster):
+    open_draft()
+    bot.mk_handle_tap("mk:post:abc:EVIL TEXT", 555, OWNER)       # extra data in the tap is not used as text
+    assert poster == [] or poster[0][0] == "Draft reply text. NFA"
+
+def test_skip_never_posts(poster):
+    open_draft()
+    assert bot.mk_handle_tap("mk:skip:abc", 555, OWNER) == "Skipped." and poster == []
+    assert "Already handled" in bot.mk_handle_tap("mk:post:abc", 555, OWNER) and poster == []
+
+def test_expired_drafts_do_not_post(poster):
+    open_draft(t=time.time() - 90000)
+    assert "expired" in bot.mk_handle_tap("mk:post:abc", 555, OWNER) and poster == []
+
+def test_unknown_draft_does_not_post(poster):
+    assert "Already handled" in bot.mk_handle_tap("mk:post:nope", 555, OWNER) and poster == []
+
+def test_daily_limit_of_approved_posts(poster):
+    os.makedirs(bot.STATE, exist_ok=True)
+    open(f"{bot.STATE}/mk_posted-{bot.now.date()}", "w").write("\n".join(f"d{i}" for i in range(bot.MK_MAX_APPROVED_PER_DAY)))
+    open_draft()
+    assert "Daily limit" in bot.mk_handle_tap("mk:post:abc", 555, OWNER) and poster == []
+
+def test_quote_drafts_post_as_a_quote(poster):
+    open_draft(reply_to=None, quote_id="321")
+    bot.mk_handle_tap("mk:post:abc", 555, OWNER)
+    assert poster[0][1]["quote_id"] == "321" and poster[0][1]["reply_to"] is None
+
+def test_failed_post_can_be_retried(monkeypatch):
+    def boom(*a, **k): raise RuntimeError("x down")
+    monkeypatch.setattr(bot, "post", boom)
+    open_draft()
+    assert "Could not post" in bot.mk_handle_tap("mk:post:abc", 555, OWNER)
+    assert bot.mk_pending()["abc"]["state"] == "open"
+
+def test_garbage_taps_are_ignored(poster):
+    for data in ("", "hello", "mk:", "mk:post"): assert bot.mk_handle_tap(data, 555, OWNER) is None
+    assert poster == []
+
+def test_marketing_drafts_with_buttons_post_nothing_and_store_open_drafts(monkeypatch):
+    sent = []
+    monkeypatch.setattr(bot.cliperz_keys, "optional", lambda n: OWNER if n == "TELEGRAM_OWNER_CHAT_ID" else None)
+    monkeypatch.setattr(bot, "tg_api", lambda method, **p: sent.append((method, p)) or {})
+    monkeypatch.setattr(bot, "post", lambda *a, **k: pytest.fail("drafts must not post"))
+    monkeypatch.setattr(bot, "mk_find_posts", lambda n=3: [(5, {"id": "9", "text": "is this a rug? check holders", "public_metrics": {"like_count": 3}}, {"username": "someone", "public_metrics": {"followers_count": 900}})])
+    monkeypatch.setattr(bot, "mk_quote_draft", lambda: None)
+    monkeypatch.setattr(bot, "_once_today", lambda t: True); monkeypatch.setattr(bot, "now", bot.now.replace(hour=12))
+    bot.marketing_drafts()
+    with_kb = [p for m, p in sent if "reply_markup" in p]
+    assert len(with_kb) == 1 and with_kb[0]["reply_markup"]["inline_keyboard"][0][0]["callback_data"].startswith("mk:post:")
+    assert [v["state"] for v in bot.mk_pending().values()] == ["open"]
+
+def test_telegram_actions_reads_taps_and_posts(monkeypatch, poster):
+    open_draft()
+    monkeypatch.setattr(bot.cliperz_keys, "optional", lambda n: OWNER if n == "TELEGRAM_OWNER_CHAT_ID" else None)
+    calls = []
+    def fake(method, **p):
+        calls.append(method)
+        if method == "getUpdates":
+            return {"result": [{"update_id": 41, "callback_query": {"id": "q1", "data": "mk:post:abc", "from": {"id": 555}, "message": {"chat": {"id": 555}, "message_id": 8}}}]}
+        return {}
+    monkeypatch.setattr(bot, "tg_api", fake)
+    bot.telegram_actions()
+    assert len(poster) == 1 and "answerCallbackQuery" in calls and open(f"{bot.STATE}/mk_tgoffset").read() == "42"
+    assert any("✅ Posted" in m for m in bot.SENT)
+
+def test_telegram_actions_does_not_poll_when_nothing_is_waiting(monkeypatch):
+    monkeypatch.setattr(bot.cliperz_keys, "optional", lambda n: OWNER)
+    monkeypatch.setattr(bot, "tg_api", lambda *a, **k: pytest.fail("must not poll Telegram without open drafts"))
+    bot.telegram_actions()
+
+
+# ---------- paper-trade outcome summary ----------
+def test_outcome_summary_groups_by_tier_and_decision():
+    rows = [dict(tier="early", decision="blocked", m1h="0"), dict(tier="early", decision="blocked", m1h="0"), dict(tier="early", decision="blocked", m1h="1.4"),
+            dict(tier="normal", decision="posted", m1h="0.8"), dict(tier="normal", decision="pass", m1h="2.0"), dict(tier="normal", decision="pass", m1h="")]
+    bot.cand_save([dict(ca="c", symbol="s", **r) for r in rows])
+    out = bot.outcome_summary()
+    assert "early / blocked: 3 coins, median 0.00x after 1h, 33% above 1.0x, 67% gone" in out
+    assert "normal / called: 2 coins" in out                      # the row without an outcome yet is not counted
+
+def test_outcome_summary_with_no_data():
+    assert bot.outcome_summary() == "No finished 1-hour outcomes yet."
+
+
+# ---------- only one copy of the bot may post ----------
+def run_main(extra_env):
+    env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_ACTIONS", "CLIPERZ_DRY", "CLIPERZ_ALLOW_LOCAL")}
+    env.update(extra_env)
+    return subprocess.run([sys.executable, os.path.join(ROOT, "bot", "bot.py")], capture_output=True, text=True, env=env, timeout=60)
+
+def test_a_non_github_copy_refuses_to_run():
+    r = run_main({"CLIPERZ_FAKE": "1"})
+    if os.path.exists(os.path.join(ROOT, "STOP")): assert "STOP file" in r.stderr           # the STOP kill switch wins first
+    else: assert r.returncode != 0 and "Only the GitHub Actions run may post" in r.stderr
