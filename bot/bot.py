@@ -112,7 +112,7 @@ def tg_send(text, image=None, tweet_id=None):
     except Exception as e:
         print(f"[TG] could not mirror to Telegram ({type(e).__name__}); X post is unaffected")
 
-def post(text, reply_to=None, media=None, image=None, mirror=True):
+def post(text, reply_to=None, media=None, image=None, mirror=True, quote_id=None):
     print(("[DRY RUN] " if DRY else "[POST] ") + text + (f"\n[+ image {media}]" if media else "") + "\n")
     if DRY:
         if mirror: tg_send(text, image, "dry")
@@ -120,6 +120,7 @@ def post(text, reply_to=None, media=None, image=None, mirror=True):
     body = {"text": text}
     if media: body["media"] = {"media_ids": [media]}
     if reply_to and str(reply_to).isdigit(): body["reply"] = {"in_reply_to_tweet_id": reply_to}
+    if quote_id and str(quote_id).isdigit(): body["quote_tweet_id"] = str(quote_id)
     tid = http("https://api.x.com/2/tweets", json.dumps(body).encode(),
                {"Authorization": "Bearer " + token(), "Content-Type": "application/json"})["data"]["id"]
     if mirror: tg_send(text, image, tid)
@@ -162,6 +163,26 @@ def name_ok(*names):
         if (len(w) <= 4 and re.search(r"(?<![a-z])" + re.escape(w) + r"(?![a-z])", text)) or (len(w) > 4 and w in text): return False
     return True
 
+def gt_trending(ttl=300):
+    """GeckoTerminal trending/top pools. These lists change slowly, so they are fetched at most every 5 minutes (5 requests) and reused between
+    cycles; the fast-moving DexScreener lists are fetched every cycle. This is what cut most of our GeckoTerminal rate-limit trouble."""
+    f = f"{STATE}/gt_addrs.json"; ch = CFG["chain"]
+    try:
+        c = json.load(open(f))
+        if time.time() - c["t"] < ttl and c["a"]: return list(c["a"])
+    except Exception: pass
+    out = []
+    for path in ("trending_pools?page=1", "trending_pools?page=2", "trending_pools?duration=1h&page=1", "trending_pools?duration=6h&page=1",
+                 "pools?sort=h24_volume_usd_desc&page=1"):
+        try:
+            for p in gt_get(f"https://api.geckoterminal.com/api/v2/networks/{ch}/{path}")["data"]:
+                out.append(p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1])
+        except Exception: pass
+    if out:
+        try: os.makedirs(STATE, exist_ok=True); json.dump({"t": time.time(), "a": out}, open(f, "w"))
+        except Exception: pass
+    return out
+
 _ADDR = [0.0, []]
 def candidate_addresses():
     """Where we look for coins: DexScreener's newest profiles and boosted lists, and GeckoTerminal's trending pools (default, 1h, 6h)
@@ -177,12 +198,7 @@ def candidate_addresses():
                 "https://api.dexscreener.com/token-boosts/top/v1"):
         try: out += [p["tokenAddress"] for p in http(url) if p.get("chainId") == ch]
         except Exception: pass
-    for path in ("trending_pools?page=1", "trending_pools?page=2", "trending_pools?duration=1h&page=1", "trending_pools?duration=6h&page=1",
-                 "pools?sort=h24_volume_usd_desc&page=1"):
-        try:
-            for p in gt_get(f"https://api.geckoterminal.com/api/v2/networks/{ch}/{path}")["data"]:
-                out.append(p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1])
-        except Exception: pass
+    out += gt_trending()
     out = list(dict.fromkeys(out)); _ADDR[0] = time.time(); _ADDR[1] = out
     try: os.makedirs(STATE, exist_ok=True); json.dump({"t": time.time(), "a": out}, open(f"{STATE}/addrs.json", "w"))
     except Exception: pass
@@ -729,12 +745,28 @@ def scan_digest(every=1200):
     open(mark, "w").close()
     owner_msg("🔎 " + scan_summary())
 
+def outcome_summary():
+    """Paper-trade view of every coin that reached the safety stage: for each group (tier and decision) how many have a 1-hour outcome, the median
+    market-cap multiple after 1 hour (1.0 = unchanged, 0 = gone), and the share that were above 1.0. This is the evidence for tuning thresholds:
+    if blocked coins did as well as the ones we called, the gate is too strict; if they did far worse, it is doing its job."""
+    import collections, statistics
+    groups = collections.defaultdict(list)
+    for r in cand_rows():
+        try: v = float(r.get("m1h"))
+        except (TypeError, ValueError): continue
+        groups[(r.get("tier") or "normal", "called" if r.get("decision") in ("pass", "posted") else r.get("decision") or "?")].append(v)
+    if not groups: return "No finished 1-hour outcomes yet."
+    lines = []
+    for (tier, dec), v in sorted(groups.items()):
+        lines.append(f"{tier} / {dec}: {len(v)} coins, median {statistics.median(v):.2f}x after 1h, {100 * sum(1 for x in v if x > 1) / len(v):.0f}% above 1.0x, {100 * sum(1 for x in v if x == 0) / len(v):.0f}% gone")
+    return "\n".join(lines)
+
 def weekly_analysis():
     """Sundays from 18:00 UTC: private DM with what the logged outcomes say about which features predict good calls (needs enough finished outcomes)."""
     if DRY or now.weekday() != 6 or now.hour < 18 or not _once_today("analysis"): return
     import subprocess
     out = subprocess.run([sys.executable, f"{ROOT}/bot/analyze.py"], capture_output=True, text=True, timeout=60).stdout.strip()
-    if out: owner_msg("📊 Weekly outcome analysis\n" + out)
+    owner_msg("📊 Weekly outcome analysis\n" + outcome_summary() + ("\n\n" + out if out else ""))
 
 def daily_growth(hour=16):
     """Once a day, private DM only: follower/post counts plus up to 4 ready-to-paste reply drafts for coins people are talking about
@@ -761,6 +793,62 @@ def daily_growth(hour=16):
         if len(drafts) >= 4: break
     body = "\n\n".join(f"{i+1}) {d}" for i, d in enumerate(drafts)) or "No coin passed the safety check for a reply draft today."
     owner_msg(f"{head}\n\nReply drafts to paste by hand under other people's call-outs (add value, no link-dropping):\n\n{body}")
+
+def tg_api(method, **params):
+    """Telegram Bot API call (JSON). Raises on HTTP errors; callers wrap it."""
+    tok = cliperz_keys.optional("TELEGRAM_BOT_TOKEN")
+    return http(f"https://api.telegram.org/bot{tok}/{method}", json.dumps(params).encode(), {"Content-Type": "application/json"})
+
+def mk_pending():
+    try: return json.load(open(f"{STATE}/mk_pending.json"))
+    except Exception: return {}
+
+def mk_pending_save(d):
+    os.makedirs(STATE, exist_ok=True)
+    json.dump({k: v for k, v in d.items() if time.time() - v.get("t", 0) < 3 * 86400}, open(f"{STATE}/mk_pending.json", "w"))
+
+MK_MAX_APPROVED_PER_DAY = 6
+
+def mk_handle_tap(data, from_id, owner_id):
+    """One tap on a draft button. Returns a short answer for the owner. ONLY the owner's own tap can post, once per draft, expired after 24 h,
+    at most MK_MAX_APPROVED_PER_DAY a day. The text posted is exactly the draft that was shown (stored server-side, not taken from the tap)."""
+    if str(from_id) != str(owner_id): return None                      # anyone else: ignored completely
+    try: _, action, did = data.split(":", 2)
+    except ValueError: return None
+    pend = mk_pending(); d = pend.get(did)
+    if not d or d.get("state") != "open": return "Already handled or expired."
+    if time.time() - d["t"] > 86400: d["state"] = "expired"; mk_pending_save(pend); return "That draft expired (older than 24 hours)."
+    if action == "skip": d["state"] = "skipped"; mk_pending_save(pend); return "Skipped."
+    if action != "post": return None
+    cap = f"{STATE}/mk_posted-{now.date()}"; n = len(open(cap).read().split()) if os.path.exists(cap) else 0
+    if n >= MK_MAX_APPROVED_PER_DAY: return f"Daily limit of {MK_MAX_APPROVED_PER_DAY} approved posts reached. Try tomorrow."
+    d["state"] = "posting"; mk_pending_save(pend)                      # mark first, so a retry can never post it twice
+    try:
+        tid = post(d["text"], reply_to=d.get("reply_to"), quote_id=d.get("quote_id"), mirror=False)
+    except Exception as e:
+        d["state"] = "open"; mk_pending_save(pend); return f"Could not post ({type(e).__name__}); you can tap again."
+    d["state"] = "posted"; mk_pending_save(pend); open(cap, "a").write(f"{did}\n")
+    return f"✅ Posted: https://x.com/{CFG.get('handle', 'Cliperzcoins711')}/status/{tid}"
+
+def telegram_actions():
+    """Each cycle: if drafts are waiting for approval, read the owner's button taps (Telegram getUpdates) and act on them."""
+    if DRY or not CFG.get("marketing_buttons", True): return
+    owner = cliperz_keys.optional("TELEGRAM_OWNER_CHAT_ID")
+    if not owner or not any(v.get("state") == "open" for v in mk_pending().values()): return
+    offf = f"{STATE}/mk_tgoffset"; off = int(open(offf).read()) if os.path.exists(offf) else 0
+    res = tg_api("getUpdates", offset=off, timeout=0, allowed_updates=["callback_query"]).get("result", [])
+    for u_ in res:
+        off = u_["update_id"] + 1; cq = u_.get("callback_query")
+        if not cq: continue
+        ans = mk_handle_tap(cq.get("data", ""), (cq.get("from") or {}).get("id"), owner)
+        try: tg_api("answerCallbackQuery", callback_query_id=cq["id"], text=(ans or "")[:150])
+        except Exception: pass
+        if ans:
+            owner_msg(ans)
+            try:
+                m = cq.get("message") or {}; tg_api("editMessageReplyMarkup", chat_id=m["chat"]["id"], message_id=m["message_id"], reply_markup={"inline_keyboard": []})
+            except Exception: pass
+    os.makedirs(STATE, exist_ok=True); open(offf, "w").write(str(off))
 
 # ---------- Marketing agent: DRAFTS ONLY. It finds relevant posts and prepares reply/quote drafts and sends them privately to the owner.
 # It never posts, replies, quotes, follows or likes anything itself; the owner copies a draft and posts it by hand. ----------
@@ -824,9 +912,10 @@ def mk_quote_draft():
         f"${x['token']}: called at {fmt(c0)}, peaked at {fmt(pkm)} = {pk:.1f}x after our post. Peak, not a promise. We check safety before every call. NFA"
 
 def marketing_drafts(hours=(12, 18)):
-    """Twice a day: private DM with up to 3 reply drafts and 1 quote draft. Drafts only; the owner decides and posts."""
+    """Twice a day: up to 3 reply drafts and 1 quote draft, sent privately to the owner. With buttons on, each draft arrives as its own message
+    with [Post this] / [Skip]; the post is only made when the owner taps. Without buttons it is one plain DM to copy from."""
     if DRY or now.hour not in hours or not _once_today(f"mk{now.hour}"): return
-    seen = mk_seen(); parts = []; used = set()
+    seen = mk_seen(); items = []; used = set()
     try:
         for _, t, us in mk_find_posts(8):
             txt = mk_reply_text(t)
@@ -834,21 +923,41 @@ def marketing_drafts(hours=(12, 18)):
             if not txt or (m and m.group(0) in used): continue       # one draft per coin
             if m: used.add(m.group(0))
             snippet = t["text"].replace("\n", " ")[:140]
-            parts.append(f"REPLY to @{us['username']} ({us['public_metrics']['followers_count']:,} followers, {t['public_metrics']['like_count']} likes)\n"
-                         f"https://x.com/{us['username']}/status/{t['id']}\nTheir post: \"{snippet}\"\nDraft: {txt}")
+            items.append(dict(text=txt, reply_to=t["id"], label=f"REPLY to @{us['username']} ({us['public_metrics']['followers_count']:,} followers, {t['public_metrics']['like_count']} likes)\n"
+                              f"https://x.com/{us['username']}/status/{t['id']}\nTheir post: \"{snippet}\"\nDraft: {txt}"))
             seen.add(t["id"])
-            if len(parts) >= 3: break
+            if len(items) >= 3: break
     except Exception as e: print(f"[WARN] marketing search failed ({type(e).__name__}: {str(e)[:80]})")
     qd = mk_quote_draft()
-    if qd: seen.add(qd[0]); parts.append(f"QUOTE our own call-out (quote this post, paste the draft)\n{qd[1]}\nDraft: {qd[2]}")
-    if not parts: return
+    if qd:
+        seen.add(qd[0]); items.append(dict(text=qd[2], quote_id=qd[1].rsplit("/", 1)[-1], label=f"QUOTE our own call-out\n{qd[1]}\nDraft: {qd[2]}"))
+    if not items: return
     os.makedirs(STATE, exist_ok=True); json.dump(sorted(seen)[-400:], open(f"{STATE}/mk_seen.json", "w"))
-    owner_msg("📣 Marketing drafts. NOTHING was posted: copy what you like and post it from your own phone.\n\n" + "\n\n".join(parts))
+    owner = cliperz_keys.optional("TELEGRAM_OWNER_CHAT_ID")
+    if CFG.get("marketing_buttons", True) and owner:
+        pend = mk_pending(); sent = 0
+        try:
+            tg_api("sendMessage", chat_id=owner, text="📣 Marketing drafts. Nothing is posted unless you tap [Post this] on a draft.", disable_web_page_preview=True)
+            for it in items:
+                import hashlib
+                did = hashlib.sha1((it["text"] + str(time.time())).encode()).hexdigest()[:10]
+                pend[did] = dict(text=it["text"], reply_to=it.get("reply_to"), quote_id=it.get("quote_id"), state="open", t=time.time())
+                tg_api("sendMessage", chat_id=owner, text=it["label"][:3900], disable_web_page_preview=True,
+                       reply_markup={"inline_keyboard": [[{"text": "✅ Post this", "callback_data": f"mk:post:{did}"}, {"text": "⏭ Skip", "callback_data": f"mk:skip:{did}"}]]})
+                sent += 1
+            mk_pending_save(pend)
+            return
+        except Exception as e:
+            print(f"[WARN] marketing buttons failed ({type(e).__name__}); sending a plain DM instead")
+            if sent: mk_pending_save(pend); return
+    owner_msg("📣 Marketing drafts. NOTHING was posted: copy what you like and post it from your own phone.\n\n" + "\n\n".join(it["label"] for it in items))
 
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
+    if os.environ.get("GITHUB_ACTIONS") != "true" and not DRY and os.environ.get("CLIPERZ_ALLOW_LOCAL") != "1":
+        sys.exit("Only the GitHub Actions run may post (a second copy would fight it over the single-use X login). See RUNBOOK.md; set CLIPERZ_ALLOW_LOCAL=1 only when moving to a private server.")
     t_all = time.time(); times = {}
-    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, marketing_drafts, weekly_analysis, scan_digest):   # one failing stage must not skip the rest
+    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, telegram_actions, marketing_drafts, weekly_analysis, scan_digest):   # one failing stage must not skip the rest
         t0 = time.time()
         try: stage()
         except Exception as e: print(f"[WARN] {stage.__name__} failed this cycle: {type(e).__name__}: {str(e)[:100]}")
