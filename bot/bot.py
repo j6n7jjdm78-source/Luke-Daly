@@ -1,7 +1,7 @@
 """Meme coin call-out bot. Run every ~10 min via cron/launchd: python3 bot/bot.py
 Env: X_CLIENT_ID, X_CLIENT_SECRET. Needs tokens.json from auth.py.
 Create a file named STOP in repo root to halt all posting."""
-import os, sys, csv, json, time, base64, datetime as dt, statistics as st
+import os, re, sys, csv, json, time, base64, datetime as dt, statistics as st
 import urllib.parse as u, urllib.request as r, urllib.error
 import cliperz_keys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -31,9 +31,19 @@ def token():
     if time.time() - obtained > t.get("expires_in", 7200) - 300:  # refresh
         cid, sec = cliperz_keys.load()
         a = base64.b64encode(f"{cid}:{sec}".encode()).decode()
-        t = http("https://api.x.com/2/oauth2/token", u.urlencode(dict(grant_type="refresh_token",
-                 refresh_token=t["refresh_token"], client_id=cid)).encode(),
-                 {"Authorization": "Basic " + a, "Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            t = http("https://api.x.com/2/oauth2/token", u.urlencode(dict(grant_type="refresh_token",
+                     refresh_token=t["refresh_token"], client_id=cid)).encode(),
+                     {"Authorization": "Basic " + a, "Content-Type": "application/x-www-form-urlencoded"})
+        except urllib.error.HTTPError as ex:   # tell the owner once an hour why the X login cannot refresh (no secrets in the message)
+            try: body = ex.read().decode()[:200]
+            except Exception: body = ""
+            mark = f"{STATE}/refresh-alert"; os.makedirs(STATE, exist_ok=True)
+            if not os.path.exists(mark) or time.time() - os.path.getmtime(mark) > 3600:
+                open(mark, "w").close()
+                owner_msg(f"⚠️ X login could not refresh (HTTP {ex.code}). X says: {body}\nClient id length {len(cid)}, secret length {len(sec)}. "
+                          "401 usually means the X client id/secret saved in GitHub secrets is wrong. Nothing can post until it is fixed.")
+            raise
         t["obtained_at"] = time.time()
         json.dump(t, open(TOK, "w"))
     return t["access_token"]
@@ -67,6 +77,15 @@ def owner_msg(text):
         http(base + "sendMessage", json.dumps({"chat_id": oid, "text": text[:3900], "disable_web_page_preview": True}).encode(), {"Content-Type": "application/json"})
     except Exception:
         pass
+
+def owner_alert(key, text, every=3600):
+    """Private alert that repeats at most once per `every` seconds for the same key, so a problem that persists cannot flood the owner's chat."""
+    try:
+        os.makedirs(STATE, exist_ok=True); mark = f"{STATE}/alert-{re.sub('[^A-Za-z0-9]', '_', key)[:60]}"
+        if os.path.exists(mark) and time.time() - os.path.getmtime(mark) < every: return
+        open(mark, "w").close()
+    except Exception: pass
+    owner_msg(text)
 
 def tg_send(text, image=None, tweet_id=None):
     """Mirrors a post to the Telegram channel. Never raises: a Telegram problem must not affect X posting."""
@@ -244,7 +263,7 @@ def publish_call(q, mc, liq, text, tier=""):
                        env={**os.environ, "CARD_TAG": "EARLY CALL" if tier == "EARLY" else "CALL"})
         media = "dry-media" if DRY else upload_image(png)
     except Exception as e:
-        print(f"[SKIP] could not make/upload the card ({e!r}); not posting a text-only call"); owner_msg(f"⚠️ Could not make/upload the card for ${sym}; call NOT posted. Will retry next cycle."); return
+        print(f"[SKIP] could not make/upload the card ({e!r}); not posting a text-only call"); owner_alert(f"card-{sym}", f"⚠️ Could not make/upload the card for ${sym}; call NOT posted (retrying every cycle, this alert repeats at most hourly). Cause: {e!r}"); return
     tid = post(text, media=media, image=png)
     rs.append(dict(id=n, token=sym, chain=CFG["chain"], contract=ca, called_at_utc=now.isoformat(), mcap_at_call=mc,
                    tweet_id=tid, status="open", current_mcap=mc, multiple=1.0, notes=tier))
@@ -602,8 +621,14 @@ def daily_growth(hour=16):
     Nothing is ever posted or replied automatically."""
     if now.hour < hour or DRY or not _once_today("growth"): return
     try:
-        me = http("https://api.x.com/2/users/me?user.fields=public_metrics", headers={"Authorization": "Bearer " + token()})["data"]["public_metrics"]
+        auth = {"Authorization": "Bearer " + token()}
+        u = http("https://api.x.com/2/users/me?user.fields=public_metrics", headers=auth)["data"]; me = u["public_metrics"]
         head = f"📈 Growth check: {me.get('followers_count')} followers, {me.get('tweet_count')} posts."
+        try:   # views and likes on the last 20 posts (best effort; the X plan may not return impressions)
+            tw = http(f"https://api.x.com/2/users/{u['id']}/tweets?max_results=20&tweet.fields=public_metrics", headers=auth).get("data") or []
+            views = sum(t["public_metrics"].get("impression_count", 0) for t in tw); likes = sum(t["public_metrics"].get("like_count", 0) for t in tw)
+            head += f" Last {len(tw)} posts: {views:,} views, {likes} likes."
+        except Exception: pass
     except Exception: head = "📈 Growth check (follower count unavailable)."
     drafts = []
     for sc, q, mc, liq, age in sorted(candidates(), key=lambda t: -t[0])[:12]:
