@@ -464,7 +464,11 @@ def cand_save(rs):
 def log_candidate(ca, q, age_m, run, decision, reason, tier="early", qscore="", src=""):
     """Record a coin the first time it reaches the safety stage, with the features we may want to learn from. Outcomes are filled in later."""
     rs = cand_rows()
-    if any(x["ca"] == ca for x in rs): return
+    old = [x for x in rs if x["ca"] == ca]
+    if old:      # already logged: keep the first record, but remember that a news alert also flagged this coin
+        if tier == "narrative" and not str(old[0].get("src") or "").startswith("news:") and not old[0].get("reason", "").startswith("also narrative"):
+            old[0]["reason"] = f"also narrative: {reason} | {old[0].get('reason') or ''}"[:200]; cand_save(rs)
+        return
     d = RC_LAST.get(ca) or {}; tx = (q.get("txns") or {}).get("h1", {}); pc = q.get("priceChange") or {}
     rs.append(dict(ca=ca, symbol=q["baseToken"]["symbol"], eval_utc=now.isoformat(timespec="seconds"), age_m=round(age_m), mcap=round(q.get("marketCap") or 0),
                    liq=round((q.get("liquidity") or {}).get("usd", 0)), holders=d.get("totalHolders", ""), score=d.get("score_normalised", ""),

@@ -112,3 +112,20 @@ def test_radar_shows_a_blocked_safety_verdict(radar, monkeypatch):
 def test_radar_does_nothing_in_dry_mode_or_when_disabled(radar, monkeypatch):
     monkeypatch.setattr(bot, "DRY", True); bot.narrative_radar(every=0); assert radar == []
     monkeypatch.setattr(bot, "DRY", False); monkeypatch.setitem(bot.CFG, "narrative_enabled", False); bot.narrative_radar(every=0); assert radar == []
+
+
+def test_alias_matching_uses_whole_words_not_substrings():
+    c = lambda name, sym="X": narrative.coin_view(pair(sym, name, 50000, 90000, 2), NOW.timestamp() * 1000)
+    assert narrative.matches(c("Elon Musk Coin"), ["elon", "musk"]) and narrative.matches(c("ELONMUSK"), ["elon"]) and narrative.matches(c("x", "ELON"), ["elon"])
+    assert not narrative.matches(c("Melon Cat"), ["elon"]) and not narrative.matches(c("Trumpet Dog"), ["trump"]) and not narrative.matches(c("Muskrat"), ["musk"])
+    assert narrative.matches(c("Trump Pepe"), ["trump"])
+
+def test_missing_24h_change_does_not_print_none():
+    coins = narrative.best_coins([pair("JEN", "Jensen Fan", 60000, 120000, 5, h24=None)], ["jensen"], NOW.timestamp() * 1000)
+    assert "None" not in narrative.format_alert("Jensen Huang", narrative.parse_rss(rss(HOT)), coins, NOW)
+
+def test_a_coin_logged_earlier_still_records_the_narrative_alert(radar):
+    bot.log_candidate("CAJ", pair("JENSEN", "Jensen Is Back", 77992, 1069938, 2.7, ca="CAJ"), 160, None, "blocked", "x", tier="early")
+    bot.narrative_radar(every=0)
+    row = [r for r in bot.cand_rows() if r["ca"] == "CAJ"][0]
+    assert row["tier"] == "early" and row["reason"].startswith("also narrative: narrative:Jensen Huang")

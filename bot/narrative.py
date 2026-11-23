@@ -28,7 +28,7 @@ def parse_rss(xml_text):
     return out
 
 
-def heat(items, now, window_h=6, fresh_min=120):
+def heat(items, now, window_h=6):
     """How hot is a story? Returns (distinct publishers in the last window_h hours, minutes since the newest headline). Hot needs both fresh and broad."""
     recent = [x for x in items if 0 <= (now - x["ts"]).total_seconds() <= window_h * 3600]
     if not recent: return 0, None
@@ -58,9 +58,20 @@ def coin_view(p, now_ms):
                 key=norm_name(b.get("name")) or norm_name(b.get("symbol")), pair=p)
 
 
+NOT_THE_NAME = {"trumpet", "trumpets", "trumpeter", "musketeer", "musketeers", "muskrat", "muskox", "elongated", "elongate"}
+
+
+def words(s):
+    return re.findall(r"[a-z0-9]+", (s or "").lower())
+
+
 def matches(coin, aliases):
-    t = norm_name(coin["name"]) + " " + norm_name(coin["symbol"])
-    return any(a in t for a in aliases)
+    """True when a whole WORD of the coin's name or symbol is the alias (or starts with it and is only a little longer, like 'elonmusk').
+    Plain substring matching would call 'Melon' an Elon coin."""
+    for w in words(coin["name"]) + words(coin["symbol"]):
+        if w in NOT_THE_NAME: continue
+        if any(w == a or (w.startswith(a) and len(w) <= len(a) + 6) for a in aliases): return True
+    return False
 
 
 def red_flags(c, family_size):
@@ -94,7 +105,7 @@ def format_alert(entity, items, coins, now, verdicts=None):
     for x in top: lines.append(f"• {x['title'][:110]} ({int((now - x['ts']).total_seconds() // 60)} min ago)")
     for c, fam in coins:
         fl = red_flags(c, fam); v = (verdicts or {}).get(c["ca"], "not checked")
-        lines += ["", f"Best matching coin: ${c['symbol']} ({c['name'][:30]})", f"Market cap ${c['mc']:,.0f} | liquidity ${c['liq']:,.0f} | age {c['age_h']:.1f}h | 24h {c['h24']}%",
+        lines += ["", f"Best matching coin: ${c['symbol']} ({c['name'][:30]})", f"Market cap ${c['mc']:,.0f} | liquidity ${c['liq']:,.0f} | age {c['age_h']:.1f}h | 24h {'n/a' if c['h24'] is None else str(c['h24']) + '%'}",
                   f"CA: {c['ca']}", f"Safety: {v}", "Red flags: " + ("; ".join(fl) if fl else "none found")]
     lines += ["", "Private alert only, nothing was posted. Never imply the named person endorses a coin. NFA."]
     return "\n".join(lines)

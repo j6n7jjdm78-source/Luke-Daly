@@ -41,7 +41,7 @@ def candles(pool, eval_ts):
     """Candles from the evaluation time to 24 h later, oldest first: [(ts, open, high, low, close), ...]."""
     end = int(eval_ts + 24 * 3600 + 600)
     d = bot.gt_get(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool}/ohlcv/minute?aggregate=5&limit=300&before_timestamp={end}&currency=usd")
-    cs = [(c[0], c[1], c[2], c[3], c[4]) for c in d["data"]["attributes"]["ohlcv_list"] if c[0] >= eval_ts - 300]
+    cs = [(c[0], c[1], c[2], c[3], c[4]) for c in d["data"]["attributes"]["ohlcv_list"] if c[0] >= eval_ts]
     return sorted(cs)
 
 def peaks(cs, price0, eval_ts):

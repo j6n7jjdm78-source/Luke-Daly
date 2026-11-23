@@ -80,3 +80,10 @@ def test_report_builds_and_states_its_limits(tmp_path, monkeypatch):
     assert "Peak >= 2x within 6h" in md and "Read this before trusting any number" in md and "Small samples" in md
     assert "1 reached 2x+" in md.replace("**", "") or "1 reached 2x+" in md                 # the absurd 99,999,999,999 peak is not counted as a win
     assert not math.isnan(len(md))
+
+
+def test_report_with_no_data_does_not_crash(tmp_path, monkeypatch):
+    d = tmp_path / "bt"; d.mkdir()
+    (d / "candidates_snapshot.csv").write_text("ca,symbol,eval_utc,age_m,mcap,liq,holders,score,flags,buys,sells,m5,h1,run_pct,decision,reason,price0,m1h,m3h,m6h,tier,qscore,src\n")
+    monkeypatch.setattr(run, "D", str(d))
+    assert "nothing to test" in run.build()

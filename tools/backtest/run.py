@@ -118,6 +118,7 @@ def split_by_time(rows):
 
 def build():
     rows = load(); sets = apply_rules(rows); md = []
+    if not rows: return "# Backtest\n\nNo logged coins with a finished 1-hour outcome yet, so there is nothing to test.\n"
     base = stats(rows)
     md += ["# Backtest: which rules find the coins that reach bigger peaks?", "",
            "Metric (chosen by the owner): **peak >= 2x** = the coin's best 5-minute close within 6 hours of our evaluation was at least twice the price at evaluation. "
