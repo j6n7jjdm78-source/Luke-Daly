@@ -85,3 +85,7 @@ class Keystore:
         dk = _open(self._mk, b["dk"], aad)
         b["dk"] = _seal(new_master, dk, aad)
         return json.dumps(b)
+
+
+if __name__ == "__main__":   # run ON THE SERVER once: python3 -m tradebot.keystore  -> prints a new master key; store it, back it up OFFLINE
+    print(Keystore.generate_master_key())

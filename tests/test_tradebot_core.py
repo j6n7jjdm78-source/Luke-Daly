@@ -1,7 +1,6 @@
 import base64, json, pytest
 from tradebot.keystore import Keystore, KeystoreError, b58encode
 from tradebot import pin, policy, fees
-from tradebot.db import DB
 
 MK = bytes(range(32)); NOW = 1_000_000.0
 
@@ -79,14 +78,17 @@ def test_fee_math_exact():
     with pytest.raises(ValueError): fees.fee(10, 900)
 
 
-def test_db_flow(tmp_path):
-    db = DB(str(tmp_path / "t.db")); ks = Keystore(MK)
-    u = db.create_user(111, NOW); assert db.create_user(111, NOW) == u            # idempotent
-    pk, blob = ks.new_wallet(); db.add_wallet(u, pk, blob)
-    w = db.wallet(u); assert ks.secret(w["pubkey"], w["blob"])
-    db.add_address(u, "D" * 40, NOW); assert db.whitelist(u) == {"D" * 40: NOW}
-    db.record_withdrawal(u, "D" * 40, 5, NOW); db.record_withdrawal(u, "D" * 40, 7, NOW - 200000)
-    assert db.withdrawn_since(u, NOW - 86400) == 5
-    db.freeze(u); assert db.user(u)["frozen"] == 1
-    db.audit(u, "x'; DROP TABLE users;--", {"a": 1}, NOW)                         # injection-safe
-    assert db.user(u) is not None
+def test_signer_db_and_app_db_split(tmp_path):
+    from tradebot.signer_db import SignerDB
+    from tradebot.app_db import AppDB
+    db = SignerDB(str(tmp_path / "s.db")); ks = Keystore(MK)
+    pk, blob = ks.new_wallet(); db.add_wallet(5, pk, blob)
+    w = db.wallet(5); assert ks.secret(w["pubkey"], w["blob"])
+    db.add_address(5, "D" * 40, NOW); assert db.whitelist(5) == {"D" * 40: NOW}
+    db.record_withdrawal(5, "D" * 40, 5, NOW, "s"); db.record_withdrawal(5, "D" * 40, 7, NOW - 200000, "s2")
+    assert db.withdrawn_since(5, NOW - 86400) == 5
+    db.audit(5, "x'; DROP TABLE wallets;--", {"a": 1}, NOW); assert db.wallet(5) is not None   # injection-safe
+    a = AppDB(str(tmp_path / "a.db")); a.ensure_user(5, NOW, pubkey=pk)
+    cols = {r["name"] for r in a.c.execute("PRAGMA table_info(users)")}
+    assert not ({"blob", "pin_hash", "secret"} & cols)                                          # app DB has no secret columns
+    assert "blob" not in json.dumps([dict(r) for r in a.c.execute("SELECT * FROM users")])
