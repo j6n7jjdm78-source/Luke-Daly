@@ -152,7 +152,7 @@ def main():
     ap.add_argument("--days", type=int, default=90)
     ap.add_argument("--sweep", action="store_true", help="also sweep the gold filters")
     a = ap.parse_args()
-    for sym in SYMBOLS:
+    for sym in [x for x in SYMBOLS if x.enabled]:
         try:
             d15, d1h = load(sym, a.days)
         except Exception as e:
