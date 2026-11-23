@@ -68,8 +68,8 @@ Of the 15 coins that reached 2x, **0 were ones we called and 15 were blocked by 
 
 | Group | Coins with candles | Entry after 0 min: peak >= 2x | Entry after 3 min: peak >= 2x | Entry after 6 min: peak >= 2x | Entry after 10 min: peak >= 2x |
 |---|---|---|---|---|---|
-| All logged coins | 34 | 14/34 (41%, CI 26%-58%) | 12/34 (35%, CI 21%-52%) | 12/34 (35%, CI 21%-52%) | 11/34 (32%, CI 19%-49%) |
-| Early coins blocked by 'LP unlocked' | 18 | 12/18 (67%, CI 44%-84%) | 12/18 (67%, CI 44%-84%) | 12/18 (67%, CI 44%-84%) | 11/18 (61%, CI 39%-80%) |
+| All logged coins | 35 | 14/35 (40%, CI 26%-56%) | 12/35 (34%, CI 21%-51%) | 12/35 (34%, CI 21%-51%) | 11/35 (31%, CI 19%-48%) |
+| Early coins blocked by 'LP unlocked' | 19 | 12/19 (63%, CI 41%-81%) | 12/19 (63%, CI 41%-81%) | 12/19 (63%, CI 41%-81%) | 11/19 (58%, CI 36%-77%) |
 | Coins we actually called | 15 | 2/15 (13%, CI 4%-38%) | 0/15 (0%, CI 0%-20%) | 0/15 (0%, CI 0%-20%) | 0/15 (0%, CI 0%-20%) |
 
 Of the coins that reached 2x, the first 2x close came a median **49 minutes** after we evaluated them (fastest 13, slowest 75); a call needs the confirmation wait plus posting time before anyone can act on it.
