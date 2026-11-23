@@ -1,0 +1,12 @@
+{
+ "as_of": "2026-11-23T13:00:00+00:00",
+ "last_price": 3616.29,
+ "zone_halfwidth": 1.31,
+ "levels": [
+  {
+   "price": 3557.48,
+   "touches": 3,
+   "side": "support"
+  }
+ ]
+}
