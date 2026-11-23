@@ -7,7 +7,7 @@ Built from the 5 interview answers. Status: PLAN ONLY. Nothing is connected, no 
 2. Goal: paper trading, 5 to 10 trades a day.
 3. Screen time: watching charts and drawing support/resistance levels.
 4. Account: EUR 100 paper. Risk per trade 3% (EUR 3). Goal 5% a day (EUR 5), treated as an aspiration, not a rule.
-5. Broker: Vantage or PU Prime on MetaTrader (MT5). Both should offer demo accounts; confirm when you open one.
+5. Broker: none. Vantage/PU Prime demo was not possible, so we use the MetaQuotes demo built into MT5 (account type: demo, currency EUR, balance 100). Confirm XAUUSD and BTCUSD exist on it.
 
 ## Automation pick (1-5; higher hours = better, higher damage = worse, higher ease = easier)
 | Job | Hours saved | Damage if wrong | Ease without code | Verdict |
@@ -73,6 +73,13 @@ Plus the **Coordinator**, the only agent you talk to.
 - Sends one daily message: market recap, what each agent did, open trades and P&L, anything Shield blocked, and the one decision needed from you.
 - Never acts on a trade without your clear permission.
 
+## Demo setup steps (you do these)
+1. Install MetaTrader 5 from metatrader5.com (Windows; on Mac use the official Mac build or a Windows VPS).
+2. File > Open an Account > search "MetaQuotes-Demo" > Next > Open a demo account. Choose currency EUR, deposit 100, leverage 1:100 or lower.
+3. Open Market Watch (Ctrl+M) > right-click > Symbols. Find XAUUSD (or GOLD) and BTCUSD. If missing, tell me what gold/BTC symbols it lists.
+4. For each symbol right-click > Specification and note: minimum volume, volume step, contract size, typical spread.
+5. Do not give me the account password. It stays on your machine; the bot will run there.
+
 ## Config (plain English; edit values here)
 ```
 mode: PAPER (demo account only)
@@ -92,7 +99,7 @@ go_live: only when I type "go live" after the final check
 ```
 
 ## One-day plan
-- Morning: open a Vantage or PU Prime DEMO account in EUR with MT5; check XAUUSD and BTCUSD contract specs (min lot, step, spread); install MT5; get Scout running and posting levels.
+- Morning: install MT5, open a MetaQuotes demo account (EUR, 100 balance, leverage 1:100 or lower); check XAUUSD and BTCUSD contract specs (min lot, step, spread); install MT5; get Scout running and posting levels.
 - Afternoon: Lab tests the first rule; Shield and Pilot connect to the demo account; Journal and Coordinator start; bot runs on paper.
 - Evening: review what works, what doesn't, what is next.
 
