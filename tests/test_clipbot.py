@@ -56,3 +56,28 @@ def test_next_slot_and_guidance(tmp_path, monkeypatch):
     monkeypatch.setattr(growth, "INSIGHTS", tmp_path / "none.json")
     assert "no performance data" in growth.guidance()
     assert "Titles currently" in growth.guidance([{"title": "x", "views": 1}])
+
+
+def test_credit_overlay_and_handle():
+    from clipbot.render import build_ass
+    from clipbot.source import credit_handle
+    ass = build_ass([Word(0, 1, "hi")], 0, "Arial", 72, credit="@creator", duration=10)
+    assert "Credit,,0,0,0,,@creator" in ass
+    assert credit_handle({"uploader_id": "@abc"}) == "@abc"
+    assert credit_handle({"channel_url": "https://www.youtube.com/@xyz/streams"}) == "@xyz"
+    assert credit_handle({"channel": "Some Name"}) == "Some Name"
+
+
+def test_overlap_dedupe_and_tail(tmp_path):
+    from clipbot.cli import overlaps
+    from clipbot.source import prepend_tail
+    st = {"k": {"stream": "s", "abs_start": 100, "abs_end": 130}}
+    assert overlaps(st, "s", 120, 150) and not overlaps(st, "s", 130, 160)
+    assert not overlaps(st, "other", 100, 130)
+    for n in ("a", "b"):
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=s=320x240:d=5:r=25",
+                        "-f", "lavfi", "-i", "sine=d=5", "-shortest", str(tmp_path / f"{n}.mkv")],
+                       check=True, capture_output=True)
+    out, tail = prepend_tail(tmp_path / "a.mkv", tmp_path / "b.mkv", 2, tmp_path / "j.mkv")
+    from clipbot.source import duration
+    assert tail >= 2 and abs(duration(out) - (tail + 5)) < 0.5

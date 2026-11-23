@@ -1,6 +1,11 @@
+niche: ""                # e.g. "gaming highlights"; used to scout trending title styles
+rights_confirmed: false   # set true ONLY for streams you own or have permission to clip
+                          # (uploads are blocked until this is true)
+
 # clipbot configuration
 source:
   max_age_hours: 24     # only streams that are live or ended within this window
+  overlap_seconds: 60   # live: tail of previous chunk re-included so boundary moments survive
   chunk_minutes: 10     # live mode: record + clip in chunks this long
 
 download:
@@ -27,6 +32,8 @@ render:
   captions: true
   font: Arial
   font_size: 72
+  credit: true              # small @creator watermark on every clip
+  credit_position: top-left # top-left / bottom-left
 
 upload:
   enabled: true

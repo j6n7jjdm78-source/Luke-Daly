@@ -5,7 +5,12 @@ YouTube live stream (VOD) → auto-picked highlights → 9:16 captioned clips �
 Pipeline: `yt-dlp` download → `faster-whisper` word-level transcript → Claude picks the best
 short (12–35s) hook-first moments → `ffmpeg` renders 1080x1920 with burned-in captions → YouTube Data API upload.
 
-## Setup
+## Setup (laptop)
+```bash
+./scripts/setup.sh                 # venv + deps; creates .env
+python -m clipbot --doctor         # preflight: shows anything still missing
+```
+Manual steps:
 ```bash
 sudo apt install ffmpeg            # or brew install ffmpeg
 pip install -r requirements.txt
@@ -34,3 +39,8 @@ Works on streams that are **live now** (records in 10-min chunks and clips as it
 - **First comment**: posted automatically (the API can't pin it; pin in Studio).
 - **Analyst**: `python -m clipbot --analyze` pulls retention stats into `insights.json`; the best/worst past Shorts are fed into the clip-selection prompt on the next run.
 - Re-run the OAuth login once after updating (new scopes: comments + analytics).
+
+## Safety & credit
+- `rights_confirmed` in `config.yaml` must be `true` before any upload. Only set it for streams you own or have permission to clip.
+- Every clip gets a small `@creator` watermark and `Source: @creator - <url>` in the description. Credit is good practice but is **not** a licence; get the creator's OK for streams that aren't yours.
+- Live chunks overlap (`source.overlap_seconds`) so moments spanning a chunk boundary aren't cut; clips are de-duplicated by absolute stream time.

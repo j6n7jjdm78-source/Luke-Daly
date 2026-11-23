@@ -62,3 +62,35 @@ def record_chunk(url: str, out: Path, seconds: int, max_height: int) -> Path:
     cmd += ["-t", str(seconds), "-c", "copy", str(out)]
     subprocess.run(cmd, check=False, capture_output=True)
     return out
+
+
+def credit_handle(info: dict) -> str:
+    """Best '@handle' for the stream's creator, falling back to the channel name."""
+    uid = info.get("uploader_id") or ""
+    if uid.startswith("@"):
+        return uid
+    url = info.get("channel_url") or info.get("uploader_url") or ""
+    if "/@" in url:
+        return "@" + url.split("/@", 1)[1].split("/")[0]
+    return info.get("channel") or info.get("uploader") or ""
+
+
+def duration(path: Path) -> float:
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                        "-of", "csv=p=0", str(path)], check=True, capture_output=True, text=True)
+    return float(r.stdout.strip())
+
+
+def prepend_tail(prev: Path, new: Path, seconds: int, out: Path) -> tuple[Path, float]:
+    """out = last ~`seconds` of prev + all of new (so moments spanning chunks survive).
+
+    Stream copy cuts on a keyframe, so the real tail can be longer than asked; returns
+    (out, actual_tail_seconds)."""
+    tail = out.with_name("tail.mkv")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-sseof", f"-{seconds}", "-i",
+                    str(prev), "-c", "copy", str(tail)], check=True, capture_output=True)
+    lst = out.with_name("concat.txt")
+    lst.write_text(f"file '{tail.resolve()}'\nfile '{new.resolve()}'\n")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i",
+                    str(lst), "-c", "copy", str(out)], check=True, capture_output=True)
+    return out, duration(tail)
