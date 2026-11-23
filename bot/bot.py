@@ -31,9 +31,19 @@ def token():
     if time.time() - obtained > t.get("expires_in", 7200) - 300:  # refresh
         cid, sec = cliperz_keys.load()
         a = base64.b64encode(f"{cid}:{sec}".encode()).decode()
-        t = http("https://api.x.com/2/oauth2/token", u.urlencode(dict(grant_type="refresh_token",
-                 refresh_token=t["refresh_token"], client_id=cid)).encode(),
-                 {"Authorization": "Basic " + a, "Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            t = http("https://api.x.com/2/oauth2/token", u.urlencode(dict(grant_type="refresh_token",
+                     refresh_token=t["refresh_token"], client_id=cid)).encode(),
+                     {"Authorization": "Basic " + a, "Content-Type": "application/x-www-form-urlencoded"})
+        except urllib.error.HTTPError as ex:   # tell the owner once an hour why the X login cannot refresh (no secrets in the message)
+            try: body = ex.read().decode()[:200]
+            except Exception: body = ""
+            mark = f"{STATE}/refresh-alert"; os.makedirs(STATE, exist_ok=True)
+            if not os.path.exists(mark) or time.time() - os.path.getmtime(mark) > 3600:
+                open(mark, "w").close()
+                owner_msg(f"⚠️ X login could not refresh (HTTP {ex.code}). X says: {body}\nClient id length {len(cid)}, secret length {len(sec)}. "
+                          "401 usually means the X client id/secret saved in GitHub secrets is wrong. Nothing can post until it is fixed.")
+            raise
         t["obtained_at"] = time.time()
         json.dump(t, open(TOK, "w"))
     return t["access_token"]

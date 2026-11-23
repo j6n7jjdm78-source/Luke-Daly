@@ -18,7 +18,7 @@ def load():
                 vals[k.strip()] = v.strip().strip('"').strip("'")
     out = []
     for name in ("X_CLIENT_ID", "X_CLIENT_SECRET"):
-        v = os.environ.get(name) or vals.get(name)
+        v = (os.environ.get(name) or vals.get(name) or "").strip().strip('"').strip("'")   # a pasted secret often carries a trailing newline or space
         if not v:
             raise SystemExit(f"{name} fehlt: als Umgebungsvariable setzen oder in {KEYS} eintragen (siehe SETUP.md).")
         out.append(v)
@@ -27,7 +27,7 @@ def load():
 
 def optional(name):
     """Optional setting (e.g. TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID): environment first, then keys.env. Returns None if not set."""
-    if os.environ.get(name): return os.environ[name]
+    if os.environ.get(name, "").strip(): return os.environ[name].strip().strip('"').strip("'")
     if os.path.exists(KEYS):
         for line in open(KEYS, encoding="utf-8"):
             line = line.strip()
