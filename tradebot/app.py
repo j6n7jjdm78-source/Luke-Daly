@@ -254,7 +254,6 @@ class App:
             except (ValueError, IndexError): return [ack]
             s["step"] = "wd_amt"; s["exp"] = self.clock() + TTL
             return [ack, self._send(chat, "How much SOL to withdraw?")]
-        tk = s["data"] if s and s["step"] in ("tok", "confirm", "buy_amt", "buy_pin") else None
         if d == "tok" and s and s["step"] == "tok": return [ack] + self.token_screen(uid, chat, s["data"]["mint"])
         if d.startswith("buy:") and s and s["step"] == "tok":
             if not self._trading_on(): return [ack] + self._off(chat)

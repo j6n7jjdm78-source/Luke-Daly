@@ -76,7 +76,7 @@ def volume_since(self, tg_id, since, side="buy"):
 def swaps_since(self, tg_id, since):
     return self.c.execute("SELECT COUNT(*) n FROM swaps WHERE tg_id=? AND ts>=?", (tg_id, since)).fetchone()["n"]
 def add_fee(self, tg_id, now, side, mint, volume, fee, sig, settled):
-    self.c.execute("INSERT INTO fee_ledger(tg_id,ts,side,mint,volume,fee,sig,settled) VALUES(?,?,?,?,?,?,?,?)", (tg_id, now, side, mint, volume, fee, sig, 1 if settled else 0)); self.c.commit()
+    self.c.execute("INSERT INTO fee_ledger(tg_id,ts,side,mint,volume,fee,sig,settled) VALUES(?,?,?,?,?,?,?,?)", (tg_id, now, side, mint, volume, fee, sig, int(settled))); self.c.commit()
 def owed_fees(self, tg_id): return self.c.execute("SELECT id, fee FROM fee_ledger WHERE tg_id=? AND settled=0 ORDER BY id LIMIT 3", (tg_id,)).fetchall()
 def settle_fee(self, fee_id, sig):
     self.c.execute("UPDATE fee_ledger SET settled=1, sig=? WHERE id=?", (sig, fee_id)); self.c.commit()

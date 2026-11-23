@@ -16,7 +16,7 @@ sudo chown -R root:root "$APP"; sudo chmod -R go-w "$APP"
 sudo chown tradebot-signer:tradebot-signer /var/lib/tradebot-signer; sudo chmod 700 /var/lib/tradebot-signer
 # master key: created once, readable only by the signer. BACK IT UP OFFLINE: losing it loses every wallet.
 if ! sudo test -f /var/lib/tradebot-signer/master.key; then
-  sudo -u tradebot-signer sh -c 'umask 077; /opt/tradebot/venv/bin/python -m tradebot.keystore > /var/lib/tradebot-signer/master.key' 
+  sudo -u tradebot-signer sh -c 'cd /opt/tradebot && umask 077 && /opt/tradebot/venv/bin/python -m tradebot.keystore > /var/lib/tradebot-signer/master.key'
   echo "Master key created at /var/lib/tradebot-signer/master.key (not shown here). Back it up offline NOW:  sudo cat /var/lib/tradebot-signer/master.key"
 fi
 sudo chmod 400 /var/lib/tradebot-signer/master.key
@@ -74,6 +74,8 @@ ReadWritePaths=/var/lib/tradebot
 [Install]
 WantedBy=multi-user.target
 UNIT
+# signer config: trading stays OFF until you set trading_enabled=true AND a real fee_wallet (a wallet YOU control, never one of the users')
+sudo test -f /var/lib/tradebot-signer/signer.json || sudo sh -c 'umask 077; echo "{\"trading_enabled\": false, \"fee_wallet\": \"\", \"fee_bps\": 100}" > /var/lib/tradebot-signer/signer.json; chown tradebot-signer:tradebot /var/lib/tradebot-signer/signer.json'
 # the signer's RPC url lives in a file only it can read
 sudo test -f /var/lib/tradebot-signer/rpc.env || sudo sh -c 'umask 077; echo "TRADEBOT_RPC_URL=https://api.devnet.solana.com" > /var/lib/tradebot-signer/rpc.env; chown tradebot-signer:tradebot /var/lib/tradebot-signer/rpc.env'
 sudo systemctl daemon-reload; sudo systemctl enable tradebot-signer tradebot-app

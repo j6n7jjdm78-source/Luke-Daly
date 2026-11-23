@@ -84,7 +84,7 @@ def validate(user, side, mint, net_in, jup, cfg=None):
     ata_m, ata_w = ata(user, mint), ata(user, WSOL)
     own_token_accts = {str(ata_m), str(ata_w)}
     max_priority = cfg.get("max_priority_fee_lamports", 5_000_000)
-    ixs, priority, units, price, n_swap = [], 0, 200_000, 0, 0
+    ixs, priority, units, price, n_swap = [], 0, None, 0, 0
     for kind, raw in collect(jup):
         ix = parse_ix(raw); prog = str(ix.program_id); data = bytes(ix.data); accts = ix.accounts
         for a in accts:
@@ -127,6 +127,7 @@ def validate(user, side, mint, net_in, jup, cfg=None):
         ixs.append(ix)
     if n_swap != 1:
         raise Refuse("expected exactly one swap")
+    units = 1_400_000 if units is None else units       # no explicit limit: the runtime may grant up to the maximum
     priority = units * price // 1_000_000
     if units > 1_400_000 or priority > max_priority:
         raise Refuse("priority fee too high")

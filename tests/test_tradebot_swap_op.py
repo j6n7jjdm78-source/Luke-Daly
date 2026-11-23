@@ -34,7 +34,7 @@ class Env:
     def __init__(self, tmp):
         T[0] = 1_000_000.0; self.rpc = RPC(); self.db = SignerDB(":memory:")
         self.s = Signer(Keystore(bytes(range(32))), self.db, self.rpc, str(tmp / "PAUSE"), clock=lambda: T[0],
-                        cfg={"fee_wallet": FEE_WALLET, "fee_bps": 100})
+                        cfg={"fee_wallet": FEE_WALLET, "fee_bps": 100, "trading_enabled": True})
         r = self.s.handle({"op": "create_wallet", "tg_id": 1}); self.user = r["pubkey"]
         self.mint = str(Keypair().pubkey()); self.ata_m, self.ata_w = str(g.ata(self.user, self.mint)), str(g.ata(self.user, g.WSOL))
         self.set_state(10 * SOL, 0, 10 * SOL - 4_000_000, 1000)
@@ -164,7 +164,7 @@ def test_failed_fee_is_recorded_owed_and_retried(e):
 def test_paused_frozen_unconfigured_and_hostile(e, tmp_path):
     good_buy_state(e)
     e.s.handle({"op": "admin_pause"}); assert not e.swap(amount=SOL // 2)["ok"]; os.unlink(e.s.pause_file)
-    e.s.cfg = {}; assert "not configured" in e.swap(amount=SOL // 2)["error"]; e.s.cfg = {"fee_wallet": FEE_WALLET}
+    e.s.cfg = {"trading_enabled": True}; assert "not configured" in e.swap(amount=SOL // 2)["error"]; e.s.cfg = {"fee_wallet": FEE_WALLET, "trading_enabled": True}
     e.s.handle({"op": "admin_freeze", "tg_id": 1}); r = e.swap(amount=SOL // 2); assert not r["ok"] and "frozen" in r["error"]; e.db.set_frozen(1, False)
     for kw in ({"side": "hold"}, {"mint": "x"}, {"amount": 0}, {"amount": True}, {"amount": "5"}, {"min_out": -1}, {"slippage_bps": 0},
                {"slippage_bps": 10 ** 9}, {"jup": None}, {"jup": []}, {"jup": {"swapInstruction": 1}}, {"mint": e.user}, {"mint": g.WSOL}):
@@ -174,3 +174,19 @@ def test_paused_frozen_unconfigured_and_hostile(e, tmp_path):
             assert e.s.handle(req)["ok"] is False, kw; continue
         r = e.swap(amount=SOL // 2, **kw) if "amount" not in kw else e.swap(**kw); assert r["ok"] is False, kw
     assert e.rpc.sent == []
+
+
+def test_trading_is_off_unless_explicitly_enabled(e):
+    good_buy_state(e)
+    e.s.cfg = {"fee_wallet": FEE_WALLET}                                   # enabled flag missing -> refused
+    r = e.swap(amount=SOL // 2); assert not r["ok"] and "disabled" in r["error"] and e.rpc.sent == []
+    e.s.cfg = {"fee_wallet": FEE_WALLET, "trading_enabled": False}; assert not e.swap(amount=SOL // 2)["ok"]
+    e.s.cfg = {"fee_wallet": FEE_WALLET, "trading_enabled": True}; assert e.swap(amount=SOL // 2)["ok"]
+
+
+def test_unconfirmed_buy_fee_is_never_resent(e):
+    good_buy_state(e); e.rpc.confirmed = False
+    assert e.swap(amount=SOL // 2)["ok"]
+    assert e.db.c.execute("SELECT settled FROM fee_ledger").fetchone()[0] == 2
+    e.rpc.confirmed = True; good_buy_state(e); e.swap(amount=SOL // 2)
+    assert len(e.rpc.sent) == 2                                             # only the two swap txs; no separate fee tx was sent for the unconfirmed one

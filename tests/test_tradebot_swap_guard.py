@@ -120,6 +120,13 @@ def test_sell_simulation_invariants():
     with pytest.raises(g.Refuse): g.check_simulation("sell", MINT, pre, snap(10 ** 9 - 10 ** 8, 0), 0, 5000, 10 ** 8, 200)        # loses SOL
 
 
+def test_priority_fee_assumes_max_units_when_limit_missing():
+    j = mutate(lambda j: j.__setitem__("computeBudgetInstructions", [ix(g.COMPUTE, [], b"\x03" + struct.pack("<Q", 4_000_000))]))     # price only: 200k units would be 800k lamports (passes), 1.4M units is 5.6M (> cap)
+    with pytest.raises(g.Refuse): ok_buy(j)                                   
+    j = mutate(lambda j: j.__setitem__("computeBudgetInstructions", [ix(g.COMPUTE, [], b"\x03" + struct.pack("<Q", 1_000))]))
+    assert ok_buy(j)[1] == 1_400_000 * 1_000 // 1_000_000                      # same price is fine, computed at the maximum
+
+
 def test_wsol_counts_as_sol_and_snapshot_parsing():
     acct = lambda mint, owner, amt: {"data": {"parsed": {"info": {"mint": mint, "owner": owner, "tokenAmount": {"amount": str(amt)}}}}}
     s = g.parse_snapshot([{"lamports": 100}, acct(MINT, USER, 7), acct(g.WSOL, USER, 50)], USER, MINT)

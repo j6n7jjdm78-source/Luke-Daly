@@ -182,6 +182,8 @@ class Signer:
         from solders.transaction import VersionedTransaction
         from solders.pubkey import Pubkey
         tg, w = self._wallet(req); self._gate(w); now = self.clock()
+        if not self.cfg.get("trading_enabled"):
+            raise policy.Refused("trading is disabled on this server")          # enforced here, the real security boundary, not just in the app
         if not self.cfg.get("fee_wallet"):
             raise BadRequest("trading not configured")
         side = req.get("side")
@@ -235,7 +237,7 @@ class Signer:
         out = {"sig": sig, "confirmed": bool(self.rpc.confirm(sig)), "fee_lamports": fee,
                "est_tokens": post["tokens"][mint] - pre["tokens"][mint], "est_sol": gain}
         if side == "buy":
-            self.db.add_fee(tg, now, side, mint, amount, fee, sig, True)
+            self.db.add_fee(tg, now, side, mint, amount, fee, sig, 1 if out["confirmed"] else 2)   # 2 = in-tx, unconfirmed: reconcile on-chain, never re-send
         else:
             sfee = feemod.fee(gain, bps) if out["confirmed"] else 0
             if sfee >= 5_000:
