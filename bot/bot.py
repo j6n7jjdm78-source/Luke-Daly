@@ -183,24 +183,27 @@ def gt_trending(ttl=300):
         except Exception: pass
     return out
 
-_ADDR = [0.0, []]
+_ADDR = [0.0, []]; _SRC = {}      # contract -> which source first listed it (logged with every candidate, so we can see which sources find winners)
 def candidate_addresses():
     """Where we look for coins: DexScreener's newest profiles and boosted lists, and GeckoTerminal's trending pools (default, 1h, 6h)
     plus the top pools by 24h volume. Deduplicated. More sources = more coins to judge, every one still goes through the same filters."""
     if time.time() - _ADDR[0] < 90 and _ADDR[1]: return list(_ADDR[1])    # one shared scan per cycle
     try:   # a new process starts every cycle: reuse the list from the previous cycle if it is under 2 minutes old (halves the GeckoTerminal requests)
         c = json.load(open(f"{STATE}/addrs.json"))
-        if time.time() - c["t"] < 120 and c["a"]: _ADDR[0], _ADDR[1] = c["t"], c["a"]; return list(c["a"])
+        if time.time() - c["t"] < 120 and c["a"]: _ADDR[0], _ADDR[1] = c["t"], c["a"]; _SRC.update(c.get("s") or {}); return list(c["a"])
     except Exception: pass
     out = []
     ch = CFG["chain"]
-    for url in ("https://api.dexscreener.com/token-profiles/latest/v1", "https://api.dexscreener.com/token-boosts/latest/v1",
-                "https://api.dexscreener.com/token-boosts/top/v1"):
-        try: out += [p["tokenAddress"] for p in http(url) if p.get("chainId") == ch]
+    for label, url in (("dex_profile", "https://api.dexscreener.com/token-profiles/latest/v1"), ("dex_boost", "https://api.dexscreener.com/token-boosts/latest/v1"),
+                       ("dex_top_boost", "https://api.dexscreener.com/token-boosts/top/v1")):
+        try:
+            got = [p["tokenAddress"] for p in http(url) if p.get("chainId") == ch]; out += got
+            for a in got: _SRC.setdefault(a, label)
         except Exception: pass
-    out += gt_trending()
+    gt = gt_trending(); out += gt
+    for a in gt: _SRC.setdefault(a, "gt_trending")
     out = list(dict.fromkeys(out)); _ADDR[0] = time.time(); _ADDR[1] = out
-    try: os.makedirs(STATE, exist_ok=True); json.dump({"t": time.time(), "a": out}, open(f"{STATE}/addrs.json", "w"))
+    try: os.makedirs(STATE, exist_ok=True); json.dump({"t": time.time(), "a": out, "s": {a: _SRC[a] for a in out if a in _SRC}}, open(f"{STATE}/addrs.json", "w"))
     except Exception: pass
     return list(out)
 
@@ -218,6 +221,30 @@ def quality_score(q, mc, liq, vol):
     sc += 10 if 2 <= ratio <= 12 else 5 if ratio < 2 else 0       # volume neither dead nor wash-like
     return round(sc)
 
+def market_reasons(q, age):
+    """Every normal-tier market filter a coin fails (empty list = passes). One place for the rules, used by the scan, the digest and the near-miss log."""
+    C = CFG; mc = q.get("marketCap") or 0; liq = (q.get("liquidity") or {}).get("usd", 0); vol = (q.get("volume") or {}).get("h24", 0)
+    tx = (q.get("txns") or {}).get("h1", {}); b, sl = tx.get("buys", 0), tx.get("sells", 0); pc = q.get("priceChange") or {}; why = []
+    if not C["min_mcap_usd"] <= mc <= C["max_mcap_usd"]: why.append("mcap out of $20-300k")
+    if liq < C["min_liquidity_usd"]: why.append(f"liq<${C['min_liquidity_usd']/1000:.0f}k")
+    if vol < C["min_volume_24h_usd"]: why.append("vol<$50k")
+    if not C["min_age_hours"] <= age <= C["max_age_hours"]: why.append("age out of range")
+    if not C.get("min_h1_change_pct", -5) < (pc.get("h1", 0) or 0) <= C.get("max_h1_change_pct", 40): why.append("1h move out of range")
+    if (pc.get("m5", 0) or 0) <= C.get("min_m5_change_pct", -5): why.append("dumping")
+    if b <= sl: why.append("sells >= buys")
+    if b < C.get("min_buy_ratio", 1.3) * max(sl, 1): why.append("weak buy ratio")
+    if b + sl < 200: why.append("<200 trades")
+    if mc and vol > mc * C.get("max_vol_mcap_ratio", 15): why.append("wash volume")
+    if mc and liq / mc <= 0.05: why.append("thin liquidity vs mcap")
+    return why
+
+def log_near_miss(q, age, reason, per_day=40):
+    """Paper-trade log of coins that failed exactly ONE filter (and are not junk): their outcome later tells us whether that filter is too strict."""
+    mc = q.get("marketCap") or 0; liq = (q.get("liquidity") or {}).get("usd", 0)
+    if mc < 10000 or liq < 5000: return
+    today = str(now.date()); n = sum(1 for r in cand_rows() if r.get("decision") == "nearmiss" and (r.get("eval_utc") or "").startswith(today))
+    if n < per_day: log_candidate(q["baseToken"]["address"], q, age * 60, None, "nearmiss", reason, tier="normal")
+
 def candidates():
     seen = {x["contract"] for x in rows()}
     addrs = [a for a in candidate_addresses() if a not in seen]; prefetch(addrs)
@@ -226,18 +253,14 @@ def candidates():
         if not q or not q.get("pairCreatedAt"): continue
         if not name_ok(q["baseToken"].get("symbol"), q["baseToken"].get("name")): continue
         age = (now.timestamp() * 1000 - q["pairCreatedAt"]) / 3.6e6
+        why = market_reasons(q, age)
+        if why:
+            if len(why) == 1: log_near_miss(q, age, why[0])
+            continue
         mc, liq, vol = q.get("marketCap") or 0, (q.get("liquidity") or {}).get("usd", 0), (q.get("volume") or {}).get("h24", 0)
-        tx = (q.get("txns") or {}).get("h1", {})
-        if (CFG["min_mcap_usd"] <= mc <= CFG["max_mcap_usd"] and liq >= CFG["min_liquidity_usd"] and vol >= CFG["min_volume_24h_usd"]
-                and CFG["min_age_hours"] <= age <= CFG["max_age_hours"] and tx.get("buys", 0) > tx.get("sells", 0) and liq / mc > 0.05
-                and CFG.get("min_h1_change_pct", -5) < (q.get("priceChange") or {}).get("h1", 0) <= CFG.get("max_h1_change_pct", 40)   # not falling, not already pumped
-                and (q.get("priceChange") or {}).get("m5", 0) > CFG.get("min_m5_change_pct", -5)            # not dumping right now
-                and vol <= mc * CFG.get("max_vol_mcap_ratio", 15)                                           # skip wash-trading volume
-                and tx.get("buys", 0) >= CFG.get("min_buy_ratio", 1.3) * max(tx.get("sells", 0), 1)    # clear buy pressure
-                and tx.get("buys", 0) + tx.get("sells", 0) >= 200):          # real activity
-            sc = quality_score(q, mc, liq, vol)
-            if sc < CFG.get("min_score", 0): continue
-            yield sc, q, mc, liq, age
+        sc = quality_score(q, mc, liq, vol)
+        if sc < CFG.get("min_score", 0): continue
+        yield sc, q, mc, liq, age
 
 def safety_gt(ca):
     """Contract safety gate via GeckoTerminal token info. Returns (ok, reason, summary). Fails closed when data is missing."""
@@ -418,7 +441,7 @@ def gt_get(url, tries=4):
             if getattr(e, "code", None) == 429 and i < tries - 1: _GT_COOL[0] = time.time() + 6 * (i + 1); continue    # all threads pause, none sleeps alone
             raise
 
-CAND_FIELDS = "ca,symbol,eval_utc,age_m,mcap,liq,holders,score,flags,buys,sells,m5,h1,run_pct,decision,reason,price0,m1h,m3h,m6h,tier,qscore".split(",")
+CAND_FIELDS = "ca,symbol,eval_utc,age_m,mcap,liq,holders,score,flags,buys,sells,m5,h1,run_pct,decision,reason,price0,m1h,m3h,m6h,tier,qscore,src".split(",")
 
 def cand_rows():
     f = f"{STATE}/candidates.csv"
@@ -428,7 +451,7 @@ def cand_save(rs):
     os.makedirs(STATE, exist_ok=True)
     w = csv.DictWriter(open(f"{STATE}/candidates.csv", "w", newline=""), CAND_FIELDS, extrasaction="ignore"); w.writeheader(); w.writerows(rs)
 
-def log_candidate(ca, q, age_m, run, decision, reason, tier="early", qscore=""):
+def log_candidate(ca, q, age_m, run, decision, reason, tier="early", qscore="", src=""):
     """Record a coin the first time it reaches the safety stage, with the features we may want to learn from. Outcomes are filled in later."""
     rs = cand_rows()
     if any(x["ca"] == ca for x in rs): return
@@ -437,7 +460,8 @@ def log_candidate(ca, q, age_m, run, decision, reason, tier="early", qscore=""):
                    liq=round((q.get("liquidity") or {}).get("usd", 0)), holders=d.get("totalHolders", ""), score=d.get("score_normalised", ""),
                    flags="|".join(str(x.get("name")) for x in (d.get("risks") or []) if x.get("level") in ("danger", "warn")),
                    buys=tx.get("buys", ""), sells=tx.get("sells", ""), m5=pc.get("m5", ""), h1=pc.get("h1", ""), run_pct=round(run * 100) if run is not None else "",
-                   decision=decision, reason=reason, price0=q.get("priceUsd", ""), m1h="", m3h="", m6h="", tier=tier, qscore=qscore))
+                   decision=decision, reason=reason, price0=q.get("priceUsd", ""), m1h="", m3h="", m6h="", tier=tier, qscore=qscore,
+                   src=src or _SRC.get(ca) or ("gt_new_pools" if tier == "early" else "")))
     cand_save(rs)
 
 def mark_candidate(ca, decision):
@@ -712,18 +736,7 @@ def scan_summary():
         q = pair(ca)
         if not q or not q.get("pairCreatedAt"): fails["no data"] += 1; continue
         age = (now.timestamp() * 1000 - q["pairCreatedAt"]) / 3.6e6
-        mc = q.get("marketCap") or 0; liq = (q.get("liquidity") or {}).get("usd", 0); vol = (q.get("volume") or {}).get("h24", 0)
-        tx = (q.get("txns") or {}).get("h1", {}); b, sl = tx.get("buys", 0), tx.get("sells", 0); pc = q.get("priceChange") or {}
-        why = []
-        if not C["min_mcap_usd"] <= mc <= C["max_mcap_usd"]: why.append("mcap out of $20-300k")
-        if liq < C["min_liquidity_usd"]: why.append(f"liq<${C['min_liquidity_usd']/1000:.0f}k")
-        if vol < C["min_volume_24h_usd"]: why.append("vol<$50k")
-        if not C["min_age_hours"] <= age <= C["max_age_hours"]: why.append("age out of range")
-        if not C.get("min_h1_change_pct", -5) < pc.get("h1", 0) <= C.get("max_h1_change_pct", 40): why.append("1h move out of range")
-        if pc.get("m5", 0) <= C.get("min_m5_change_pct", -5): why.append("dumping")
-        if b < C.get("min_buy_ratio", 1.3) * max(sl, 1): why.append("weak buy ratio")
-        if b + sl < 200: why.append("<200 trades")
-        if mc and vol > mc * C.get("max_vol_mcap_ratio", 15): why.append("wash volume")
+        mc = q.get("marketCap") or 0; liq = (q.get("liquidity") or {}).get("usd", 0); vol = (q.get("volume") or {}).get("h24", 0); why = market_reasons(q, age)
         if why:
             fails[why[0]] += 1
             if len(why) == 1 and mc >= 10000: near.append((vol, f"${q['baseToken']['symbol']} ({why[0]})"))
@@ -746,20 +759,25 @@ def scan_digest(every=1200):
     owner_msg("🔎 " + scan_summary())
 
 def outcome_summary():
-    """Paper-trade view of every coin that reached the safety stage: for each group (tier and decision) how many have a 1-hour outcome, the median
-    market-cap multiple after 1 hour (1.0 = unchanged, 0 = gone), and the share that were above 1.0. This is the evidence for tuning thresholds:
-    if blocked coins did as well as the ones we called, the gate is too strict; if they did far worse, it is doing its job."""
+    """Paper-trade view of every coin that reached the safety stage or narrowly missed a filter. Groups: (tier, decision), then near-misses by the one
+    filter they failed, then outcomes by data source. Per group: coins with a 1-hour outcome, median market-cap multiple after 1 hour (1.0 = unchanged,
+    0 = gone), share above 1.0x, share gone. This is the evidence for tuning: if near-misses of one filter did as well as the coins we called, that
+    filter is too strict; if blocked coins did far worse, the gate is doing its job; a source with better outcomes deserves more weight."""
     import collections, statistics
-    groups = collections.defaultdict(list)
+    groups = collections.defaultdict(list); near = collections.defaultdict(list); src = collections.defaultdict(list)
     for r in cand_rows():
         try: v = float(r.get("m1h"))
         except (TypeError, ValueError): continue
-        groups[(r.get("tier") or "normal", "called" if r.get("decision") in ("pass", "posted") else r.get("decision") or "?")].append(v)
+        dec = "called" if r.get("decision") in ("pass", "posted") else r.get("decision") or "?"
+        groups[(r.get("tier") or "normal", dec)].append(v)
+        if dec == "nearmiss": near[r.get("reason") or "?"].append(v)
+        if r.get("src") and dec in ("called", "blocked", "nearmiss"): src[r["src"]].append(v)
     if not groups: return "No finished 1-hour outcomes yet."
-    lines = []
-    for (tier, dec), v in sorted(groups.items()):
-        lines.append(f"{tier} / {dec}: {len(v)} coins, median {statistics.median(v):.2f}x after 1h, {100 * sum(1 for x in v if x > 1) / len(v):.0f}% above 1.0x, {100 * sum(1 for x in v if x == 0) / len(v):.0f}% gone")
-    return "\n".join(lines)
+    def line(name, v): return f"{name}: {len(v)} coins, median {statistics.median(v):.2f}x after 1h, {100 * sum(1 for x in v if x > 1) / len(v):.0f}% above 1.0x, {100 * sum(1 for x in v if x == 0) / len(v):.0f}% gone"
+    out = [line(f"{t} / {d}", v) for (t, d), v in sorted(groups.items())]
+    if near: out += ["", "Near-misses by the one filter they failed (high % above 1.0x = that filter may be too strict):"] + [line("  " + k, v) for k, v in sorted(near.items(), key=lambda kv: -len(kv[1]))]
+    if src: out += ["", "By data source:"] + [line("  " + k, v) for k, v in sorted(src.items(), key=lambda kv: -len(kv[1]))]
+    return "\n".join(out)
 
 def weekly_analysis():
     """Sundays from 18:00 UTC: private DM with what the logged outcomes say about which features predict good calls (needs enough finished outcomes)."""
