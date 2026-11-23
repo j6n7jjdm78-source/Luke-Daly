@@ -33,6 +33,10 @@ upload:
   privacy: private          # private/unlisted/public  (start private and review!)
   category_id: "20"         # 20 = Gaming, 22 = People&Blogs, 24 = Entertainment
   tags: []
+  first_comment: "Which part got you? Tell me below 👇"   # set null to disable
+  schedule:                 # spread posts out; set to null to publish immediately
+    timezone: America/New_York
+    post_times: ["09:00", "13:00", "18:00", "21:00"]   # 4/day
   credit_source: true       # add "Source: <url>" to description
   client_secret: client_secret.json
   token: token.json

@@ -26,6 +26,9 @@ Return ONLY a JSON array, no prose:
 no hashtags, no clickbait lies", "description": "1-2 sentences"}}]
 Return [] if nothing is good enough.
 
+Performance notes:
+{guidance}
+
 Transcript:
 {transcript}
 """
@@ -85,7 +88,7 @@ def validate(raw: list[dict], segments: list[Segment], lo: float, hi: float) -> 
     return clips
 
 
-def select_clips(segments: list[Segment], cfg: dict) -> list[Clip]:
+def select_clips(segments: list[Segment], cfg: dict, guidance: str = "(none)") -> list[Clip]:
     import anthropic
 
     client = anthropic.Anthropic()
@@ -96,7 +99,7 @@ def select_clips(segments: list[Segment], cfg: dict) -> list[Clip]:
         msg = client.messages.create(
             model=cfg["model"], max_tokens=2000,
             messages=[{"role": "user", "content": PROMPT.format(
-                n=3, lo=lo, hi=hi, transcript=transcript)}],
+                n=3, lo=lo, hi=hi, transcript=transcript, guidance=guidance)}],
         )
         found += validate(parse_clips(msg.content[0].text), win, lo, hi)
 

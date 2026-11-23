@@ -28,3 +28,9 @@ Works on streams that are **live now** (records in 10-min chunks and clips as it
   Projects not passed through Google's API audit have uploads locked to private.
 - `state.json` prevents re-uploading the same clip.
 - Tests: `pytest tests`
+
+## Growth loop
+- **Schedule**: `upload.schedule` spreads clips over daily slots (default 4/day) using YouTube scheduled publishing.
+- **First comment**: posted automatically (the API can't pin it; pin in Studio).
+- **Analyst**: `python -m clipbot --analyze` pulls retention stats into `insights.json`; the best/worst past Shorts are fed into the clip-selection prompt on the next run.
+- Re-run the OAuth login once after updating (new scopes: comments + analytics).

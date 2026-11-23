@@ -42,3 +42,17 @@ def test_freshness():
         check_fresh(old, 24)
     with pytest.raises(StaleStream):
         check_fresh({"live_status": "not_live"}, 24)
+
+
+def test_next_slot_and_guidance(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from clipbot import growth
+    now = datetime(2026, 11, 23, 14, 0, tzinfo=timezone.utc)  # 09:00 New York
+    times = ["09:00", "13:00", "18:00"]
+    a = growth.next_slot([], times, "America/New_York", now)
+    assert a == "2026-11-23T18:00:00Z"            # 13:00 NY
+    b = growth.next_slot([a], times, "America/New_York", now)
+    assert b == "2026-11-23T23:00:00Z"            # 18:00 NY
+    monkeypatch.setattr(growth, "INSIGHTS", tmp_path / "none.json")
+    assert "no performance data" in growth.guidance()
+    assert "Titles currently" in growth.guidance([{"title": "x", "views": 1}])
