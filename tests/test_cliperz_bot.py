@@ -373,3 +373,65 @@ def test_a_non_github_copy_refuses_to_run():
     r = run_main({"CLIPERZ_FAKE": "1"})
     if os.path.exists(os.path.join(ROOT, "STOP")): assert "STOP file" in r.stderr           # the STOP kill switch wins first
     else: assert r.returncode != 0 and "Only the GitHub Actions run may post" in r.stderr
+
+
+# ---------- shared market filter rules, near-miss log, source attribution ----------
+def good_pair(**over):
+    q = {"baseToken": {"address": "CAGOOD", "symbol": "GOOD", "name": "Good coin"}, "pairCreatedAt": int((time.time() - 30 * 3600) * 1000),
+         "marketCap": 100000, "liquidity": {"usd": 40000}, "volume": {"h24": 200000}, "txns": {"h1": {"buys": 300, "sells": 120}},
+         "priceChange": {"h1": 15, "m5": 2}, "priceUsd": "0.001", "pairAddress": "P"}
+    q.update(over); return q
+
+def age_h(q): return (time.time() * 1000 - q["pairCreatedAt"]) / 3.6e6
+
+def test_a_good_coin_passes_every_market_filter():
+    q = good_pair(); assert bot.market_reasons(q, age_h(q)) == []
+
+@pytest.mark.parametrize("over,reason", [
+    ({"marketCap": 5000, "liquidity": {"usd": 40000}}, "mcap out of $20-300k"),
+    ({"marketCap": 900000}, "mcap out of $20-300k"),
+    ({"liquidity": {"usd": 10000}}, "liq<$25k"),
+    ({"txns": {"h1": {"buys": 130, "sells": 120}}}, "weak buy ratio"),
+    ({"txns": {"h1": {"buys": 50, "sells": 20}}}, "<200 trades"),
+    ({"priceChange": {"h1": 15, "m5": -20}}, "dumping"),
+    ({"priceChange": {"h1": 200, "m5": 2}}, "1h move out of range"),
+    ({"volume": {"h24": 9000000}}, "wash volume"),
+])
+def test_each_filter_names_its_reason(over, reason):
+    q = good_pair(**over); assert reason in bot.market_reasons(q, age_h(q))
+
+def test_candidates_yields_good_coins_and_logs_single_filter_near_misses(monkeypatch):
+    good, near, far = good_pair(), good_pair(baseToken={"address": "CANEAR", "symbol": "NEAR", "name": "n"}, txns={"h1": {"buys": 130, "sells": 120}}), \
+        good_pair(baseToken={"address": "CAFAR", "symbol": "FAR", "name": "f"}, marketCap=5000, liquidity={"usd": 900})
+    book = {"CAGOOD": good, "CANEAR": near, "CAFAR": far}
+    monkeypatch.setattr(bot, "rows", lambda: [])
+    monkeypatch.setattr(bot, "candidate_addresses", lambda: list(book))
+    monkeypatch.setattr(bot, "prefetch", lambda a: None); monkeypatch.setattr(bot, "pair", lambda a: book[a])
+    monkeypatch.setitem(bot.CFG, "min_score", 0)
+    got = [c[1]["baseToken"]["address"] for c in bot.candidates()]
+    assert got == ["CAGOOD"]
+    logged = {r["ca"]: r for r in bot.cand_rows()}
+    assert logged["CANEAR"]["decision"] == "nearmiss" and logged["CANEAR"]["reason"] == "weak buy ratio" and logged["CANEAR"]["tier"] == "normal"
+    assert "CAFAR" not in logged and "CAGOOD" not in logged        # junk and clean passes are not near-misses
+
+def test_near_miss_log_is_capped_per_day_and_deduplicated():
+    for i in range(5):
+        bot.log_near_miss(good_pair(baseToken={"address": f"C{i}", "symbol": "X", "name": "x"}), 30, "weak buy ratio", per_day=3)
+    bot.log_near_miss(good_pair(baseToken={"address": "C0", "symbol": "X", "name": "x"}), 30, "weak buy ratio", per_day=3)
+    assert len([r for r in bot.cand_rows() if r["decision"] == "nearmiss"]) == 3
+
+def test_source_is_logged_with_the_candidate(monkeypatch):
+    monkeypatch.setitem(bot._SRC, "CASRC", "dex_boost")
+    bot.log_candidate("CASRC", good_pair(baseToken={"address": "CASRC", "symbol": "S", "name": "s"}), 600, None, "blocked", "x", tier="normal")
+    bot.log_candidate("CAEARLY", good_pair(baseToken={"address": "CAEARLY", "symbol": "E", "name": "e"}), 10, 0.1, "blocked", "y", tier="early")
+    rows_ = {r["ca"]: r for r in bot.cand_rows()}
+    assert rows_["CASRC"]["src"] == "dex_boost" and rows_["CAEARLY"]["src"] == "gt_new_pools"
+
+def test_outcome_summary_shows_near_misses_by_filter_and_by_source():
+    rows_ = [dict(ca="a", tier="normal", decision="nearmiss", reason="weak buy ratio", m1h="2.0", src="gt_trending"),
+             dict(ca="b", tier="normal", decision="nearmiss", reason="weak buy ratio", m1h="0.5", src="gt_trending"),
+             dict(ca="c", tier="normal", decision="blocked", reason="x", m1h="0", src="dex_boost")]
+    bot.cand_save([dict(symbol="s", **r) for r in rows_])
+    out = bot.outcome_summary()
+    assert "weak buy ratio: 2 coins" in out and "50% above 1.0x" in out
+    assert "By data source:" in out and "gt_trending: 2 coins" in out and "dex_boost: 1 coins" in out
