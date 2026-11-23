@@ -75,6 +75,10 @@ def report(rows, calls, hist):
          "| rule | latency s | mean x | median x | win% | worst x | mean excl. best call | no-candle calls |", "|---|---|---|---|---|---|---|---|"]
     for r in rows:
         L.append(f"| {r['rule']} | {r['latency']} | {r['mean']:.2f} | {r['median']:.2f} | {r['win']*100:.0f} | {r['worst']:.2f} | {r['no_best']:.2f} | {r['nobars']} |")
+    L += ["", "## Data coverage per call", "| id | token | status | candles | first | last |", "|---|---|---|---|---|---|"]
+    for r in calls:
+        h = hist.get(r["id"], [])
+        L.append(f"| {r['id']} | {r['token']} | {r['status']} | {len(h)} | {h[0][0] if h else '-'} | {h[-1][0] if h else '-'} |")
     return "\n".join(L) + "\n"
 
 
