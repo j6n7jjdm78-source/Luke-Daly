@@ -79,7 +79,8 @@ def main():
             row["status"] = "error"; print("  error", ca[:8], type(e).__name__, str(e)[:60])
         res[ca] = row
         if n % 10 == 0 or n == len(todo):
-            w = csv.DictWriter(open(OUT, "w", newline=""), FIELDS); w.writeheader(); w.writerows(res.values())
+            with open(OUT, "w", newline="") as fh:      # closed (and so flushed) every time, so a crash never loses finished rows
+                w = csv.DictWriter(fh, FIELDS); w.writeheader(); w.writerows(res.values())
             print(f"  {n}/{len(todo)} done (GeckoTerminal requests {bot.GT_STATS[0]}, rate-limited {bot.GT_STATS[1]})", flush=True)
 
 if __name__ == "__main__": main()
