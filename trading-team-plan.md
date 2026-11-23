@@ -137,3 +137,5 @@ Duplicate orders, missed stop, wrong position size, stale price feed, API timeou
 - Smallest possible position therefore allows a stop of about $3.5 (350 points). Wider stop = Shield BLOCKS (cannot size down below 0.01).
 - Spread of $0.15 is about 4% of a $3.5 stop, paid on every trade.
 - Margin for 1 oz at ~3630 is about $36 at 1:100 leverage, about $121 at 1:30 (more than EUR 100). Leverage must be 1:100 or higher on the demo.
+
+Confirmed from the second spec screenshot: contract size 100, digits 2, tick size 0.01, stops level 0, margin/profit currency USD, floating spread. Leverage still unconfirmed.
