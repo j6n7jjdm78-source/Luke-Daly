@@ -472,29 +472,6 @@ def early_call_out():
         if any(x["contract"] == ca for x in rows()): mark_candidate(ca, "posted")
         return
 
-def manual_call():
-    """Owner-requested call-out of one specific contract (workflow input call_ca -> env MANUAL_CA). It still has to pass the RugCheck safety gate
-    and have real liquidity; it skips only the 'is it a fresh enough, calm enough coin' scan rules, and the post states the 1h move honestly.
-    Once logged in calls.csv it is never called twice."""
-    ca = os.environ.get("MANUAL_CA", "").strip()
-    if not ca or any(x["contract"] == ca for x in rows()): return
-    q = pair(ca)
-    if not q: return owner_alert(f"manual-{ca[:6]}", f"⚠️ Manual call: no market data found for {ca[:8]}…, not posted.")
-    sym = q["baseToken"]["symbol"]; mc = float(q.get("marketCap") or 0); liq = float((q.get("liquidity") or {}).get("usd") or 0)
-    ok, why, safe = early_safety(ca)
-    if not ok or liq < E["min_liq"] or mc <= 0:
-        return owner_alert(f"manual-{ca[:6]}", f"⚠️ Manual call of ${sym} NOT posted: {why if not ok else f'liquidity ${liq:,.0f} too low or no market cap'}.")
-    age_m = (now.timestamp() * 1000 - (q.get("pairCreatedAt") or now.timestamp() * 1000)) / 60000
-    tx = (q.get("txns") or {}).get("h1", {}); h1 = (q.get("priceChange") or {}).get("h1", 0) or 0
-    cta = CFG["cta_text"].format(link=CFG["community_link"]) if CFG.get("cta_in_post") and CFG.get("community_link") else ""
-    for why_t in (f"{tx.get('buys', 0)} buys vs {tx.get('sells', 0)} sells, already {h1:+.0f}% in 1h, do not chase", f"already {h1:+.0f}% in 1h, do not chase"):
-        for sf in (f"Safety: {safe}. Very new, most fail.", f"Safety: {safe.replace(' | ', ', ')}. Can rug."):
-            text = f"EARLY / HIGH RISK\n${sym} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age_m:.0f}m\nWhy: {why_t}\n{sf}\nCA: {ca}" + (f"\n{cta}" if cta else "")
-            if xlen(text) <= 274: break
-        else: continue
-        break
-    publish_call(q, mc, liq, text, tier="EARLY")
-
 def peak_since(q, called_iso):
     """Highest market cap since the call, from 5-min price candles (GeckoTerminal). Uses candle highs but never more than
     1.25x the best candle close, so a one-off bad wick cannot inflate a result. Returns None if history is unavailable."""
@@ -676,6 +653,6 @@ def daily_growth(hour=16):
 
 if __name__ == "__main__":
     if os.path.exists(f"{ROOT}/STOP"): sys.exit("STOP file present, not posting")
-    for stage in (track, call_out, early_call_out, manual_call, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, scan_digest):   # one failing stage must not skip the rest
+    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, scan_digest):   # one failing stage must not skip the rest
         try: stage()
         except Exception as e: print(f"[WARN] {stage.__name__} failed this cycle: {type(e).__name__}: {str(e)[:100]}")
