@@ -14,6 +14,10 @@ on:
         default: "check"
         type: choice
         options: [check, test, run]
+      call_ca:
+        description: "optional: contract address to call out once (still must pass the RugCheck safety gate)"
+        default: ""
+        type: string
 permissions:
   contents: write
 concurrency:
@@ -24,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
+      MANUAL_CA: ${{ github.event.inputs.call_ca }}
       X_CLIENT_ID: ${{ secrets.CLIPERZ_X_CLIENT_ID }}
       X_CLIENT_SECRET: ${{ secrets.CLIPERZ_X_CLIENT_SECRET }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.CLIPERZ_TG_BOT_TOKEN }}
