@@ -43,7 +43,7 @@
   "early_min_trades": 100,
   "early_max_per_day": 3,
   "early_max_run_pct": 100,
-  "early_pages": 6,
+  "early_pages": 3,
   "early_min_mcap": 10000,
   "early_max_mcap": 60000,
   "blocked_name_words": [

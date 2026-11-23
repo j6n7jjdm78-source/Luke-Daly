@@ -167,6 +167,10 @@ def candidate_addresses():
     """Where we look for coins: DexScreener's newest profiles and boosted lists, and GeckoTerminal's trending pools (default, 1h, 6h)
     plus the top pools by 24h volume. Deduplicated. More sources = more coins to judge, every one still goes through the same filters."""
     if time.time() - _ADDR[0] < 90 and _ADDR[1]: return list(_ADDR[1])    # one shared scan per cycle
+    try:   # a new process starts every cycle: reuse the list from the previous cycle if it is under 2 minutes old (halves the GeckoTerminal requests)
+        c = json.load(open(f"{STATE}/addrs.json"))
+        if time.time() - c["t"] < 120 and c["a"]: _ADDR[0], _ADDR[1] = c["t"], c["a"]; return list(c["a"])
+    except Exception: pass
     out = []
     ch = CFG["chain"]
     for url in ("https://api.dexscreener.com/token-profiles/latest/v1", "https://api.dexscreener.com/token-boosts/latest/v1",
@@ -180,6 +184,8 @@ def candidate_addresses():
                 out.append(p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1])
         except Exception: pass
     out = list(dict.fromkeys(out)); _ADDR[0] = time.time(); _ADDR[1] = out
+    try: os.makedirs(STATE, exist_ok=True); json.dump({"t": time.time(), "a": out}, open(f"{STATE}/addrs.json", "w"))
+    except Exception: pass
     return list(out)
 
 def quality_score(q, mc, liq, vol):
@@ -382,17 +388,18 @@ def early_safety(ca):
     v = safety_rc(ca, min_holders=E["min_holders"], max_score=E["max_score"])
     return v if v is not None else (False, "no RugCheck report yet", "")
 
-_GT_LOCK = threading.Lock(); _GT_LAST = [0.0]
+_GT_LOCK = threading.Lock(); _GT_LAST = [0.0]; _GT_COOL = [0.0]; GT_STATS = [0, 0]   # [requests, rate-limited (429) answers], printed in the [TIMING] line
 def gt_get(url, tries=4):
     """GeckoTerminal GET: starts are spaced ~1.2 s apart across all threads (free limit ~30/min), and it waits and retries when rate limited (HTTP 429)."""
     for i in range(tries):
         with _GT_LOCK:
-            wait = 1.2 - (time.time() - _GT_LAST[0])
+            wait = max(1.2 - (time.time() - _GT_LAST[0]), _GT_COOL[0] - time.time())     # spacing, plus a shared pause after any 429
             if wait > 0: time.sleep(wait)
-            _GT_LAST[0] = time.time()
+            _GT_LAST[0] = time.time(); GT_STATS[0] += 1
         try: return http(url)
         except Exception as e:
-            if getattr(e, "code", None) == 429 and i < tries - 1: time.sleep(8 * (i + 1)); continue
+            if getattr(e, "code", None) == 429: GT_STATS[1] += 1
+            if getattr(e, "code", None) == 429 and i < tries - 1: _GT_COOL[0] = time.time() + 6 * (i + 1); continue    # all threads pause, none sleeps alone
             raise
 
 CAND_FIELDS = "ca,symbol,eval_utc,age_m,mcap,liq,holders,score,flags,buys,sells,m5,h1,run_pct,decision,reason,price0,m1h,m3h,m6h,tier,qscore".split(",")
@@ -536,6 +543,11 @@ def record_rug():
         open(f"{ROOT}/STOP", "w").write("circuit breaker")
         owner_msg(f"⛔ CIRCUIT BREAKER: {len(ev)} calls rugged within 24h. All posting is PAUSED. Tell Claude 'resume' once you have looked at it.")
 
+def _far_below(x, mc):
+    """True when a call is so far under its peak (or its call price) that it cannot be setting a new peak this cycle, so the chart-history lookup is skipped."""
+    old_pk = float(x.get("peak_mcap") or 0); c0 = float(x["mcap_at_call"])
+    return (old_pk >= c0 and mc < 0.8 * old_pk) or mc < 0.6 * c0
+
 def track():
     rs = rows()
     prefetch([x["contract"] for x in rs if x["status"] == "open" or x["status"].startswith("hit")])
@@ -544,8 +556,8 @@ def track():
         if x["status"] != "open" and not x["status"].startswith("hit"): continue
         q = pair(x["contract"])
         if not q: continue
-        mc = float(q.get("marketCap") or 0); liq = float((q.get("liquidity") or {}).get("usd") or 0); old_pk = float(x.get("peak_mcap") or 0); c0 = float(x["mcap_at_call"])
-        if liq < 5000 or mc <= 0 or (old_pk >= c0 and mc < 0.5 * old_pk) or mc < 0.3 * c0: continue
+        mc = float(q.get("marketCap") or 0); liq = float((q.get("liquidity") or {}).get("usd") or 0)
+        if liq < 5000 or mc <= 0 or _far_below(x, mc): continue
         todo.append((x["id"], q, x["called_at_utc"]))
     if todo:
         from concurrent.futures import ThreadPoolExecutor
@@ -570,7 +582,7 @@ def track():
         if liq_now < 5000 or x["multiple"] > 1000: continue   # untrustworthy numbers: no milestone posts
         # results show the PEAK multiple since the call (the most it could have gained), always labelled as a peak
         old_pk = float(x.get("peak_mcap") or 0)   # skip the slow chart-history lookup for coins far below their peak or call price (cannot be setting a new peak)
-        far_below = (old_pk >= float(x["mcap_at_call"]) and mc < 0.5 * old_pk) or mc < 0.3 * float(x["mcap_at_call"])
+        far_below = _far_below(x, mc)
         pk = max(old_pk, mc, 0 if far_below else (PEAKS.get(x["id"]) or 0))
         x["peak_mcap"] = round(pk); peak_mult = pk / float(x["mcap_at_call"])
         if peak_mult > 1000: continue
@@ -755,4 +767,4 @@ if __name__ == "__main__":
         times[stage.__name__] = time.time() - t0
     try: os.makedirs(STATE, exist_ok=True); json.dump({"total": time.time() - t_all, "stages": times}, open(f"{STATE}/timings.json", "w"))
     except Exception: pass
-    print("[TIMING] " + f"{time.time() - t_all:.0f}s total | " + ", ".join(f"{k} {v:.0f}s" for k, v in times.items() if v >= 1))
+    print("[TIMING] " + f"{time.time() - t_all:.0f}s total | " + ", ".join(f"{k} {v:.0f}s" for k, v in times.items() if v >= 1) + f" | GeckoTerminal requests {GT_STATS[0]}, rate-limited {GT_STATS[1]}")
