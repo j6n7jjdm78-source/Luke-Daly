@@ -128,3 +128,27 @@ def test_load_candles_round_trip(tmp_path):
     with gzip.open(p, "wt") as fh: fh.write(json.dumps({"ca": "A", "eval_ts": 1, "price0": 2.0, "candles": [[1, 1, 2, 1, 2]]}) + "\n" + "garbage\n")
     assert run.load_candles(str(p)) == {"A": (1, 2.0, [(1, 1, 2, 1, 2)])}
     assert run.load_candles(str(tmp_path / "missing.gz")) == {}
+
+
+# ---------- survival analysis and conclusions ----------
+def lp_coin(alive, **kw):
+    return coin(1.0, m1h=1.0 if alive else 0.0, tier="early", decision="blocked", reason="RugCheck danger: Large Amount of LP Unlocked", **kw)
+
+def test_survival_section_reports_the_base_rate_and_says_when_nothing_beats_it():
+    rows = [lp_coin(i % 10 == 0, holders=str(300 + i * 10)) for i in range(60)]       # 10% survive regardless of holders
+    out = "\n".join(run.survival_section(rows))
+    assert "60 early coins carried the LP-unlocked flag" in out and "6 (10%" in out
+    assert "No cut clearly beats the base rate" in out
+
+def test_survival_section_flags_a_clear_separator():
+    rows = [lp_coin(True, holders="300") for _ in range(25)] + [lp_coin(False, holders="900") for _ in range(100)]
+    out = "\n".join(run.survival_section(rows))
+    assert "A cut whose whole interval beats the base rate exists" in out
+
+def test_survival_section_with_too_few_coins():
+    assert run.survival_section([lp_coin(True)]) == ["Not enough LP-unlocked coins logged yet.", ""]
+
+def test_conclusions_count_blocked_winners_and_warn_against_loosening():
+    rows = [coin(3.0, decision="blocked", tier="early", reason="LP Unlocked"), coin(0.0, decision="blocked", tier="early", reason="LP Unlocked", m1h=0.0), coin(1.0, decision="posted")]
+    out = "\n".join(run.conclusions(rows))
+    assert "1 of 3 logged coins" in out and "1 of those 1 were blocked" in out and "do not loosen the safety gate" in out

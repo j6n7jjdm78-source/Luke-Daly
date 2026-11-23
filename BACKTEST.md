@@ -2,7 +2,7 @@
 
 Metric (chosen by the owner): **peak >= 2x** = the coin's best 5-minute close within 6 hours of our evaluation was at least twice the price at evaluation. Peaks come from 5-minute candles (`data/backtest/peaks.csv`); where a pool no longer exists the best known 1h/3h/6h checkpoint is used as a lower bound. Regenerate with `python3 tools/backtest/run.py`.
 
-Data: 188 logged coins (2026-11-22T12:33 to 2026-11-23T18:37 UTC); 42 have candle peaks.
+Data: 188 logged coins (2026-11-22T12:33 to 2026-11-23T18:37 UTC); 40 have candle peaks.
 
 ## Our public calls
 
@@ -13,9 +13,9 @@ Data: 188 logged coins (2026-11-22T12:33 to 2026-11-23T18:37 UTC); 42 have candl
 | Rule set | Coins | Peak >= 2x within 6h (95% CI) | Peak >= 1.5x | Median peak | Median after 1h | Above 1.0x after 1h | Gone after 1h |
 |---|---|---|---|---|---|---|---|
 | All logged coins (no filter) | 188 | 15 (8%, CI 5%-13%) | 10% | 0.00x | 0.00x | 12% | 81% |
-| Live: coins we actually called (normal + early) | 16 | 0 (0%, CI 0%-19%) | 6% | 1.15x | 0.61x | 19% | 0% |
-| Live normal tier only | 12 | 0 (0%, CI 0%-24%) | 0% | 1.15x | 0.69x | 25% | 0% |
-| No safety gate: normal-tier coins that passed market filters | 13 | 0 (0%, CI 0%-23%) | 0% | 1.15x | 0.70x | 31% | 0% |
+| Live: coins we actually called (normal + early) | 16 | 0 (0%, CI 0%-19%) | 6% | 1.14x | 0.61x | 19% | 0% |
+| Live normal tier only | 12 | 0 (0%, CI 0%-24%) | 0% | 1.14x | 0.69x | 25% | 0% |
+| No safety gate: normal-tier coins that passed market filters | 13 | 0 (0%, CI 0%-23%) | 0% | 1.14x | 0.70x | 31% | 0% |
 | Rug-checker style: holders>=50, risk score<=30, no 'LP unlocked' | 17 | 0 (0%, CI 0%-18%) | 6% | 1.15x | 0.67x | 24% | 0% |
 | Strict rug-checker: holders>=100, risk score<=20, no 'LP unlocked' | 17 | 0 (0%, CI 0%-18%) | 6% | 1.15x | 0.67x | 24% | 0% |
 | Momentum: 5m>0, 1h between +5% and +60%, buy ratio>=1.5 | 106 | 9 (8%, CI 5%-15%) | 11% | 0.00x | 0.00x | 13% | 82% |
@@ -37,7 +37,7 @@ A rule that only works in one half is probably luck.
 | Live: coins we actually called (normal + early) (first half) | 1 | 0 (0%, CI 0%-79%) | 0% | 1.14x | 0.55x | 0% | 0% |
 | Live: coins we actually called (normal + early) (second half) | 15 | 0 (0%, CI 0%-20%) | 7% | 1.15x | 0.67x | 20% | 0% |
 | Rug-checker style: holders>=50, risk score<=30, no 'LP unlocked' (first half) | 1 | 0 (0%, CI 0%-79%) | 0% | 1.14x | 0.55x | 0% | 0% |
-| Rug-checker style: holders>=50, risk score<=30, no 'LP unlocked' (second half) | 16 | 0 (0%, CI 0%-19%) | 6% | 1.17x | 0.68x | 25% | 0% |
+| Rug-checker style: holders>=50, risk score<=30, no 'LP unlocked' (second half) | 16 | 0 (0%, CI 0%-19%) | 6% | 1.15x | 0.68x | 25% | 0% |
 | Momentum: 5m>0, 1h between +5% and +60%, buy ratio>=1.5 (first half) | 57 | 5 (9%, CI 4%-19%) | 9% | 0.00x | 0.00x | 9% | 91% |
 | Momentum: 5m>0, 1h between +5% and +60%, buy ratio>=1.5 (second half) | 49 | 4 (8%, CI 3%-19%) | 14% | 0.00x | 0.00x | 18% | 71% |
 
@@ -62,6 +62,34 @@ A rule that only works in one half is probably luck.
 | JUMP COIN | early | blocked | RugCheck danger: Large Amount of LP Unlocked | 7 min | $19,391 | $33,053 | 660 | 2.4x | 2.35x |
 
 Of the 15 coins that reached 2x, **0 were ones we called and 15 were blocked by our filters** (most by the RugCheck 'LP unlocked' danger flag).
+
+
+## Could a bot that posts a few minutes later still have caught them? (entry delay)
+
+| Group | Coins with candles | Entry after 0 min: peak >= 2x | Entry after 3 min: peak >= 2x | Entry after 6 min: peak >= 2x | Entry after 10 min: peak >= 2x |
+|---|---|---|---|---|---|
+| All logged coins | 34 | 14/34 (41%, CI 26%-58%) | 12/34 (35%, CI 21%-52%) | 12/34 (35%, CI 21%-52%) | 11/34 (32%, CI 19%-49%) |
+| Early coins blocked by 'LP unlocked' | 18 | 12/18 (67%, CI 44%-84%) | 12/18 (67%, CI 44%-84%) | 12/18 (67%, CI 44%-84%) | 11/18 (61%, CI 39%-80%) |
+| Coins we actually called | 15 | 2/15 (13%, CI 4%-38%) | 0/15 (0%, CI 0%-20%) | 0/15 (0%, CI 0%-20%) | 0/15 (0%, CI 0%-20%) |
+
+Of the coins that reached 2x, the first 2x close came a median **49 minutes** after we evaluated them (fastest 13, slowest 75); a call needs the confirmation wait plus posting time before anyone can act on it.
+
+
+## Can anything tell surviving coins from rugs?
+
+170 early coins carried the LP-unlocked flag. Only **18 (11%, CI 7%-16%) were still trading after 1 hour**; the rest were gone.
+
+Best single-feature cuts for survival (scanned 33 cuts, so the best one is partly luck):
+
+| Cut | Coins | Still trading after 1h (95% CI) |
+|---|---|---|
+| holders < 600 | 36 | 9 (25%, CI 14%-41%) |
+| mcap >= 30000 | 37 | 7 (19%, CI 9%-34%) |
+| liq >= 40000 | 34 | 6 (18%, CI 8%-34%) |
+| m5 < 10 | 62 | 10 (16%, CI 9%-27%) |
+| holders < 800 | 98 | 15 (15%, CI 10%-24%) |
+
+**No cut clearly beats the base rate: with the features logged so far, surviving coins cannot be told apart from rugs before the fact.**
 
 
 ## Which logged features carry signal?
@@ -118,6 +146,15 @@ Of the 15 coins that reached 2x, **0 were ones we called and 15 were blocked by 
 | 0 to 10 | 68 | 6 (9%, CI 4%-18%) |
 | 10 to 40 | 95 | 7 (7%, CI 4%-14%) |
 | 40 to + | 20 | 2 (10%, CI 3%-30%) |
+
+## What this means (plain language)
+
+1. Only **15 of 188 logged coins (8%)** reached 2x within 6 hours, and **15 of those 15 were blocked by our safety filters** (the RugCheck 'LP unlocked' flag).
+2. Coins with that flag were **gone within an hour 89% of the time** (152 of 170), so letting them through trades a few 2x peaks for many total losses.
+3. The coins we actually called reached 2x within 6 hours **0 of 16 times** in this log. Among all rule sets tested, none beat random picking with confidence (all intervals overlap).
+4. A few minutes of posting delay hardly changes whether a *surviving* coin reaches 2x (see the entry-delay table; that table only covers coins still trading after 1h, so it is biased and is not a hit rate for new coins). The hard part is knowing in advance which coins survive.
+5. The open-source bots reviewed (QuantOrb, Scan-Scam-AI-v1) are rug detectors and publish no peak or profit results, so there is nothing comparable to beat; the fair comparison is the random-pick baseline above.
+6. **For the goal of bigger peaks:** do not loosen the safety gate on this evidence. The honest path is to collect more outcomes with the new holder-concentration, insider and creator-history features (now logged for every coin) and the narrative-radar shadow log, then re-run this report. A rule is only promoted after it beats the random baseline on forward data.
 
 ## Read this before trusting any number
 
