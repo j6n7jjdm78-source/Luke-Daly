@@ -455,3 +455,62 @@ def test_candidate_log_stores_the_new_features(monkeypatch):
     bot.log_candidate("CAF", good_pair(baseToken={"address": "CAF", "symbol": "F", "name": "f"}), 600, None, "blocked", "x", tier="normal")
     r = [x for x in bot.cand_rows() if x["ca"] == "CAF"][0]
     assert r["top1"] == "9.0" and r["insiders"] == "1" and r["holders"] == "500"
+
+
+# ---------- X API cost: no links in posts, spend tracking, 402 handling ----------
+import urllib.error as _ue, json as _json
+
+def http402(): return _ue.HTTPError("https://api.x.com", 402, "Payment Required", {}, None)
+
+def test_no_post_template_contains_a_link_or_website_name():
+    """X charges about 13x more for a post with a link, so nothing we post may contain one (the Telegram link lives in the bio)."""
+    texts = [bot.CFG["cta_text"].format(link=""), bot.COMMUNITY_LINE] + [c.format(h="x", link="") for c in bot.CTA] + list(bot.MK_TIPS)
+    texts += [l["text"] for l in _json.load(open(os.path.join(ROOT, "content", "lessons.json")))]
+    texts.append(bot.call_text("COIN", 100000, 40000, 30, {"volume": {"h24": 200000}}, "mint+freeze revoked | 500 holders | RugCheck: no risks", "CA" + "A" * 40))
+    for t in texts: assert not bot.URL_RE.search(t), f"link-like text in a post template: {t[:80]!r}"
+    assert "t.me" not in _json.dumps(bot.CFG.get("cta_text", ""))
+
+def test_url_detector_sees_links_and_site_names_but_not_normal_text():
+    for bad in ("join https://t.me/abc", "see rugcheck.xyz", "pump.fun launch", "x.com/status/1"): assert bot.URL_RE.search(bad), bad
+    for ok in ("Mint authority revoked? NFA.", "Mcap: $59k | Liq: $12k", "CA: 5o7AFuoNWsy7gQS85ospXhWFJRnxDwTtwTR3JF2Jpump", "peaked at $403k = 2.2x"): assert not bot.URL_RE.search(ok), ok
+
+def test_posts_record_their_estimated_cost_and_links_cost_more(monkeypatch):
+    monkeypatch.setattr(bot, "token", lambda: "t"); monkeypatch.setattr(bot, "tg_send", lambda *a, **k: None)
+    monkeypatch.setattr(bot, "http", lambda *a, **k: {"data": {"id": "1"}})
+    bot.post("plain text, no link"); a = bot.x_spent_today()
+    bot.post("has a link https://t.me/x"); b = bot.x_spent_today()
+    assert a == pytest.approx(0.015) and b - a == pytest.approx(0.20)
+
+def test_optional_x_calls_stop_when_the_daily_budget_is_used():
+    assert bot.x_budget_ok()
+    bot.x_spend("post_url", 3)                       # $0.60 > the $0.50 default budget
+    assert not bot.x_budget_ok()
+
+def test_spend_alert_fires_once_past_the_alert_level(monkeypatch):
+    monkeypatch.setitem(bot.CFG, "x_spend_alert_usd", 0.1)
+    bot.x_spend("post_url", 2); bot.x_spend("post_url", 2)
+    assert len([m for m in bot.SENT if "Estimated X API spend" in m]) == 1       # rate limited to once an hour
+
+def test_a_402_marks_credits_depleted_alerts_once_and_pauses_for_30_minutes(monkeypatch):
+    monkeypatch.setattr(bot, "token", lambda: "t")
+    def boom(*a, **k): raise http402()
+    monkeypatch.setattr(bot, "http", boom)
+    for _ in range(3):
+        with pytest.raises(_ue.HTTPError): bot.post("hello")
+    assert bot.x_blocked() and len([m for m in bot.SENT if "credits are depleted" in m]) == 1
+    old = time.time() - 31 * 60; os.utime(f"{bot.STATE}/x402", (old, old))
+    assert not bot.x_blocked()                         # tries again after 30 minutes
+
+def test_a_blocked_x_means_no_card_is_made_for_a_call(monkeypatch):
+    os.makedirs(bot.STATE, exist_ok=True); open(f"{bot.STATE}/x402", "w").close()
+    monkeypatch.setattr(bot.subprocess if hasattr(bot, "subprocess") else __import__("subprocess"), "run", lambda *a, **k: pytest.fail("no card must be rendered while X credits are depleted"))
+    bot.publish_call(good_pair(), 100000, 40000, "text")
+
+def test_growth_and_marketing_reads_are_skipped_when_over_budget(monkeypatch):
+    bot.x_spend("post_url", 3)
+    monkeypatch.setattr(bot, "http", lambda *a, **k: pytest.fail("no optional X read may run over budget"))
+    monkeypatch.setattr(bot, "_once_today", lambda t: True); monkeypatch.setattr(bot, "now", bot.now.replace(hour=17))
+    bot.daily_growth()
+    monkeypatch.setattr(bot, "now", bot.now.replace(hour=12)); monkeypatch.setattr(bot, "mk_quote_draft", lambda: None)
+    bot.marketing_drafts()
+    assert bot.SENT == []

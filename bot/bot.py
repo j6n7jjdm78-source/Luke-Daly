@@ -58,6 +58,39 @@ def token():
         json.dump(t, open(TOK, "w"))
     return t["access_token"]
 
+# ---------- X API cost guard (pay-per-use: credits are money) ----------
+X_COST_DEFAULT = {"post": 0.015, "post_url": 0.20, "media": 0.0, "read": 0.005, "own_read": 0.001}      # dollars; third-party figures, adjustable in config "x_cost_usd"
+URL_RE = re.compile(r"https?://\S+|\b[a-z0-9-]+\.(?:com|xyz|io|me|app|org|net|gg|fun|co|ai|so|fm|ly|gl|tv)\b", re.I)    # anything X would turn into a link
+
+def x_cost(kind, n=1): return n * float((CFG.get("x_cost_usd") or {}).get(kind, X_COST_DEFAULT[kind]))
+
+def x_spent_today():
+    try: return float(open(f"{STATE}/xspend-{now.date()}").read())
+    except Exception: return 0.0
+
+def x_spend(kind, n=1):
+    """Add the estimated cost of an X call to today's running total and alert the owner (once an hour) if the total passes x_spend_alert_usd."""
+    try:
+        os.makedirs(STATE, exist_ok=True); tot = x_spent_today() + x_cost(kind, n); open(f"{STATE}/xspend-{now.date()}", "w").write(f"{tot:.4f}")
+        if tot >= float(CFG.get("x_spend_alert_usd", 1.0)): owner_alert("xspend", f"💸 Estimated X API spend today: ${tot:.2f} (alert level ${CFG.get('x_spend_alert_usd', 1.0)}).")
+    except Exception: pass
+
+def x_blocked(minutes=30):
+    """True for a while after X answered 402 'credits depleted', so we stop making cards and calls that cannot be posted."""
+    m = f"{STATE}/x402"
+    return os.path.exists(m) and time.time() - os.path.getmtime(m) < minutes * 60
+
+def x_mark_402():
+    os.makedirs(STATE, exist_ok=True); open(f"{STATE}/x402", "w").close()
+    owner_alert("x402", "⚠️ X says API credits are depleted (HTTP 402). Nothing can be posted until you top up in the X developer console; I retry every 30 minutes.")
+
+def x_budget_ok():
+    """Optional X calls (marketing search, growth reads) only run while credits exist and today's estimated spend is under x_daily_budget_usd."""
+    return not x_blocked() and x_spent_today() < float(CFG.get("x_daily_budget_usd", 0.5))
+
+def x_check_402(e):
+    if getattr(e, "code", None) == 402: x_mark_402()
+
 def upload_image(path):
     """Uploads a PNG to X (needs the media.write scope). Returns the media id string."""
     import uuid
@@ -67,7 +100,9 @@ def upload_image(path):
         return h.encode() + (v if isinstance(v, bytes) else v.encode()) + b"\r\n"
     body = (part("media", open(path, "rb").read(), "card.png", "image/png") + part("media_category", "tweet_image")
             + part("media_type", "image/png") + f"--{b}--\r\n".encode())
-    d = http("https://api.x.com/2/media/upload", body, {"Authorization": "Bearer " + token(), "Content-Type": f"multipart/form-data; boundary={b}"})
+    try: d = http("https://api.x.com/2/media/upload", body, {"Authorization": "Bearer " + token(), "Content-Type": f"multipart/form-data; boundary={b}"})
+    except Exception as e: x_check_402(e); raise
+    x_spend("media")
     return str(d["data"]["id"])
 
 def owner_msg(text):
@@ -103,7 +138,7 @@ def tg_send(text, image=None, tweet_id=None):
         tok, chat = cliperz_keys.optional("TELEGRAM_BOT_TOKEN"), cliperz_keys.optional("TELEGRAM_CHAT_ID")
         if not tok or not chat: return
         lk = CFG.get("community_link")
-        if lk: text = "\n".join(l for l in text.split("\n") if lk not in l).rstrip()   # no "join us" line inside the community itself
+        text = "\n".join(l for l in text.split("\n") if not (lk and lk in l) and "link in bio" not in l.lower() and "community link is in the bio" not in l.lower()).rstrip()   # no "join us" line inside the community itself
         link = f"\n\nhttps://x.com/{CFG.get('handle', 'Cliperzcoins711')}/status/{tweet_id}" if str(tweet_id).isdigit() else ""
         caption = (text + link)[:1000]
         if DRY: print(f"[TG dry] {caption[:80]!r}"); return
@@ -131,8 +166,11 @@ def post(text, reply_to=None, media=None, image=None, mirror=True, quote_id=None
     if media: body["media"] = {"media_ids": [media]}
     if reply_to and str(reply_to).isdigit(): body["reply"] = {"in_reply_to_tweet_id": reply_to}
     if quote_id and str(quote_id).isdigit(): body["quote_tweet_id"] = str(quote_id)
-    tid = http("https://api.x.com/2/tweets", json.dumps(body).encode(),
-               {"Authorization": "Bearer " + token(), "Content-Type": "application/json"})["data"]["id"]
+    try:
+        tid = http("https://api.x.com/2/tweets", json.dumps(body).encode(),
+                   {"Authorization": "Bearer " + token(), "Content-Type": "application/json"})["data"]["id"]
+    except Exception as e: x_check_402(e); raise
+    x_spend("post_url" if URL_RE.search(text) else "post")
     if mirror: tg_send(text, image, tid)
     return tid
 
@@ -294,11 +332,12 @@ def safety_gt(ca):
     if top10 > 55: return False, f"top 10 holders own {top10:.0f}%", ""
     return True, "ok", f"mint+freeze revoked | {cnt} holders | top10 {top10:.0f}%"
 
+COMMUNITY_LINE = "Community: link in bio"      # X charges about 13x more for a post that contains a link, so the Telegram link lives in the bio and pinned post, never in a post
 CTA = [
-    "Why follow @{h}? Every call is logged with the market cap at the time, and results get posted: wins and losses. Join the community: {link}",
-    "What you get here: calls with a card and the contract, a safety check before each post, and a public record of how they do. Community: {link}",
-    "We track every call-out and post the results, good or bad. Follow for the next one, and join the group to talk through them: {link}",
-    "No hype, just logged calls: market cap at the call, peak results, and the misses too. Follow @{h} and join the community: {link}",
+    "Why follow @{h}? Every call is logged with the market cap at the time, and results get posted: wins and losses. Community link is in the bio.",
+    "What you get here: calls with a card and the contract, a safety check before each post, and a public record of how they do. Community link is in the bio.",
+    "We track every call-out and post the results, good or bad. Follow for the next one, and the community link is in the bio.",
+    "No hype, just logged calls: market cap at the call, peak results, and the misses too. Follow @{h} and the community link is in the bio.",
 ]
 
 def cta_reply(tid, n):
@@ -311,6 +350,7 @@ def publish_call(q, mc, liq, text, tier=""):
     """Makes the card, uploads it, posts, and logs the call. Never posts a call as text only."""
     import subprocess
     rs = rows(); sym = q["baseToken"]["symbol"]; ca = q["baseToken"]["address"]
+    if x_blocked(): print(f"[HOLD] {sym}: X credits are depleted, not making a card that cannot be posted"); return
     if CFG["paid_promo"]: text += "\nPaid promotion."
     elif CFG["i_hold_called_coins"]: text += "\nI hold this."
     n = len(rs) + 1; png = f"{ROOT}/drafts/call{n}.png"; tx = (q.get("txns") or {}).get("h1", {})
@@ -335,7 +375,7 @@ def xlen(t):
 
 def call_text(sym, mc, liq, age, q, safe, ca):
     """Call-out text ending with the follow/join line. Tries the fuller wording first and tightens until it fits in 280."""
-    cta = CFG["cta_text"].format(link=CFG["community_link"]) if CFG.get("cta_in_post") and CFG.get("community_link") else ""
+    cta = CFG["cta_text"].format(link="") if CFG.get("cta_in_post") else ""
     why = [f"Why: buys > sells last hour, 24h vol {fmt(q['volume']['h24'])}, liq/mcap {liq/mc:.0%}",
            f"Why: buys > sells (1h), vol {fmt(q['volume']['h24'])}, liq/mcap {liq/mc:.0%}", "Why: buys > sells (1h)"]
     safety = [f"Safety: {safe}. Still new, can rug.", f"Safety: {safe.replace(' | ', ', ')}. Can rug."]
@@ -581,7 +621,7 @@ def early_call_out():
         if not ok: print(f"[SKIP early] {sym}: {why}"); continue
         if not confirmed(ca, mc): print(f"[WAIT early] {sym}: passed, waiting for a second cycle to confirm"); return
         tx = q["txns"]["h1"]
-        cta = CFG["cta_text"].format(link=CFG["community_link"]) if CFG.get("cta_in_post") and CFG.get("community_link") else ""
+        cta = CFG["cta_text"].format(link="") if CFG.get("cta_in_post") else ""
         m5 = q["priceChange"].get("m5", 0)
         for why in (f"{tx['buys']} buys vs {tx['sells']} sells, 5m {m5:+.0f}%", f"buys {tx['buys']}/{tx['sells']} sells"):
             for sf in (f"Safety: {safe}. Very new, most fail.", f"Safety: {safe.replace(' | ', ', ')}. Can rug."):
@@ -678,7 +718,9 @@ def track():
                 media = "dry-media" if DRY else upload_image(png)
             except Exception as e:
                 print(f"[WARN] result card failed ({e!r}); posting the result as text"); png = None
-            post(text, reply_to=x["tweet_id"], media=media, image=png); x["status"] = f"hit{hit[-1]}x"
+            try: post(text, reply_to=x["tweet_id"], media=media, image=png)
+            except Exception as e: print(f"[WARN] milestone post for {x['token']} failed ({type(e).__name__}); will retry next cycle"); continue
+            x["status"] = f"hit{hit[-1]}x"
             owner_msg(f"🚀 MILESTONE {text}")
         elif mc < float(x["mcap_at_call"]) * 0.1 or not q: x["status"] = "dead"
         age = (now - dt.datetime.fromisoformat(x["called_at_utc"])).days
@@ -727,8 +769,8 @@ def daily_lesson(hour=14):
         lessons = json.load(open(f"{ROOT}/content/lessons.json")); idxf = f"{STATE}/lesson_idx"
         i = int(open(idxf).read()) if os.path.exists(idxf) else 0
         text = lessons[i % len(lessons)]["text"]
-        if i % 3 == 2 and CFG.get("community_link"):
-            extra = f"\nCommunity: {CFG['community_link']}"
+        if i % 3 == 2:
+            extra = f"\n{COMMUNITY_LINE}"
             if xlen(text + extra) <= 278: text += extra
         post(text); open(idxf, "w").write(str(i + 1))
     except Exception as e:
@@ -756,7 +798,7 @@ def daily_recap(hour=21):
         media = "dry-media" if DRY else upload_image(png)
     except Exception as e:
         print(f"[SKIP] recap picture failed ({e!r})"); os.remove(f"{STATE}/recap-{now.date()}"); return
-    post(f"Daily recap 📊\n{len(rs)} calls in the last 24h. Best peaks shown, labeled as peaks (not current prices).\nCommunity: {CFG.get('community_link', '')}"[:280], media=media, image=png)
+    post(f"Daily recap 📊\n{len(rs)} calls in the last 24h. Best peaks shown, labeled as peaks (not current prices).\n{COMMUNITY_LINE}"[:280], media=media, image=png)
 
 def scan_summary():
     """Short text: how many coins were looked at, why they fail, what passes the market filters and safety, and the closest near-misses.
@@ -824,13 +866,14 @@ def daily_growth(hour=16):
     """Once a day, private DM only: follower/post counts plus up to 4 ready-to-paste reply drafts for coins people are talking about
     right now (they pass our scanner filters and the RugCheck gate). The owner pastes them by hand under other people's posts.
     Nothing is ever posted or replied automatically."""
-    if now.hour < hour or DRY or not _once_today("growth"): return
+    if now.hour < hour or DRY or not x_budget_ok() or not _once_today("growth"): return
     try:
         auth = {"Authorization": "Bearer " + token()}
         u = http("https://api.x.com/2/users/me?user.fields=public_metrics", headers=auth)["data"]; me = u["public_metrics"]
         head = f"📈 Growth check: {me.get('followers_count')} followers, {me.get('tweet_count')} posts."
         try:   # views and likes on the last 20 posts (best effort; the X plan may not return impressions)
-            tw = http(f"https://api.x.com/2/users/{u['id']}/tweets?max_results=20&tweet.fields=public_metrics", headers=auth).get("data") or []
+            tw = http(f"https://api.x.com/2/users/{u['id']}/tweets?max_results=5&tweet.fields=public_metrics", headers=auth).get("data") or []
+            x_spend("own_read", 1 + len(tw))
             views = sum(t["public_metrics"].get("impression_count", 0) for t in tw); likes = sum(t["public_metrics"].get("like_count", 0) for t in tw)
             head += f" Last {len(tw)} posts: {views:,} views, {likes} likes."
         except Exception: pass
@@ -909,7 +952,7 @@ MK_QUERIES = ('(solana OR pumpfun OR "pump.fun") (rug OR rugged OR scam OR "is t
               'solana ("new coin" OR "just launched" OR gem OR "ca:") -is:retweet lang:en')
 MK_BAD = re.compile(r"giveaway|airdrop|guarantee|100x|1000x|dm me|send me|whitelist|presale|financial advice|follow back|f4f", re.I)
 CA_RE = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
-MK_TIPS = ("30-second check before buying any meme coin: is mint authority revoked? freeze authority revoked? what share do the top 10 holders own? rugcheck.xyz shows all three for free. Can't answer them? Skip it. NFA",
+MK_TIPS = ("30-second check before buying any meme coin: is mint authority revoked? freeze authority revoked? what share do the top 10 holders own? RugCheck shows all three for free. Can't answer them? Skip it. NFA",
            "Most new coins that lose their liquidity do it in the first hours. Check that the LP is locked or burned before you size up. NFA",
            "Volume can be faked. If a coin trades 20x its market cap in a day, that is often wash trading, not demand. DYOR",
            "Rule of thumb: if the dev wallet and a few top holders own a big share of supply, the exit liquidity is you. Check the holders first.",
@@ -923,8 +966,9 @@ def mk_seen():
 def mk_find_posts(n=3):
     """Recent X posts where a short, useful reply fits: about rugs/safety/holders, or containing a Solana contract we can check. Skips scammy wording."""
     q = MK_QUERIES[(now.hour // 6) % len(MK_QUERIES)]
-    d = http("https://api.x.com/2/tweets/search/recent?" + u.urlencode({"query": q, "max_results": 50, "tweet.fields": "created_at,public_metrics,author_id",
+    d = http("https://api.x.com/2/tweets/search/recent?" + u.urlencode({"query": q, "max_results": 10, "tweet.fields": "created_at,public_metrics,author_id",
              "expansions": "author_id", "user.fields": "username,public_metrics"}), headers={"Authorization": "Bearer " + token()})
+    x_spend("read", len(d.get("data") or []))
     users = {x["id"]: x for x in (d.get("includes") or {}).get("users", [])}; seen = mk_seen(); out = []
     for t in d.get("data") or []:
         us = users.get(t.get("author_id"))
@@ -1002,13 +1046,13 @@ def narrative_radar(every=600, per_entity_hours=2, per_coin_hours=6):
             print(f"[WARN] narrative radar failed for {entity} ({type(e).__name__}: {str(e)[:80]})")
     json.dump(seen, open(f"{STATE}/nr_seen.json", "w"))
 
-def marketing_drafts(hours=(12, 18)):
-    """Twice a day: up to 3 reply drafts and 1 quote draft, sent privately to the owner. With buttons on, each draft arrives as its own message
+def marketing_drafts(hours=(12,)):
+    """Once a day (12:00 UTC): up to 3 reply drafts and 1 quote draft, sent privately to the owner. With buttons on, each draft arrives as its own message
     with [Post this] / [Skip]; the post is only made when the owner taps. Without buttons it is one plain DM to copy from."""
     if DRY or now.hour not in hours or not _once_today(f"mk{now.hour}"): return
     seen = mk_seen(); items = []; used = set()
     try:
-        for _, t, us in mk_find_posts(8):
+        for _, t, us in (mk_find_posts(8) if x_budget_ok() else []):
             txt = mk_reply_text(t)
             m = CA_RE.search(t["text"])
             if not txt or (m and m.group(0) in used): continue       # one draft per coin
@@ -1018,7 +1062,7 @@ def marketing_drafts(hours=(12, 18)):
                               f"https://x.com/{us['username']}/status/{t['id']}\nTheir post: \"{snippet}\"\nDraft: {txt}"))
             seen.add(t["id"])
             if len(items) >= 3: break
-    except Exception as e: print(f"[WARN] marketing search failed ({type(e).__name__}: {str(e)[:80]})")
+    except Exception as e: x_check_402(e); print(f"[WARN] marketing search failed ({type(e).__name__}: {str(e)[:80]})")
     qd = mk_quote_draft()
     if qd:
         seen.add(qd[0]); items.append(dict(text=qd[2], quote_id=qd[1].rsplit("/", 1)[-1], label=f"QUOTE our own call-out\n{qd[1]}\nDraft: {qd[2]}"))
