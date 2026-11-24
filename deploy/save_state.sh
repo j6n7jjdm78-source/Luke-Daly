@@ -3,7 +3,7 @@
 # The bot is the ONLY writer of these files (the workflow queues runs one at a time), so its copy always wins: no merging, no rebase.
 # Each try: fetch main, set the bot's files aside, move to the latest main, put the files back, commit, push. Never leaves a half-done merge.
 set -u
-FILES="calls.csv state/tokens.enc state/watch.json state/candidates.csv state/liqmax.json state/scoreboard-* state/lesson-* state/lesson_idx state/recap-* state/growth-* state/mk* state/nr_*"
+FILES="calls.csv state/tokens.enc state/watch.json state/candidates.csv state/liqmax.json state/scoreboard-* state/lesson-* state/lesson_idx state/recap-* state/growth-* state/mk* state/nr_* state/xspend-*"
 TOK=~/.config/cliperz-bot/tokens.json; START=~/.config/cliperz-bot/tokens.start.sha
 if [ -s "$TOK" ]; then
   if [ -f "$START" ] && [ "$(sha256sum "$TOK" | cut -d' ' -f1)" = "$(cat "$START")" ]; then

@@ -31,6 +31,8 @@ How the bot runs, how to check it, and what to do when something breaks. Keep th
 | DM "could not save its state after 4 tries" | GitHub or network problem during a save | Check the run log; it retries every save, so one DM is usually transient |
 | Posts stop, no DMs | Run chain broken or paused | Watchdog will DM; otherwise start a run: Actions -> cliperz-bot -> Run workflow -> mode `run` |
 | Card upload fails (401) | X login problem (see above) | Same as the 401/400 rows |
+| DM "X API credits are depleted (HTTP 402)" | X pay-per-use balance is empty | Top up in the X developer console (Usage / Billing). The bot pauses X calls for 30 minutes at a time and resumes on its own; Telegram keeps working |
+| DM "Estimated X API spend today ..." | Daily spend estimate passed `x_spend_alert_usd` | Check Usage in the X console; optional X calls (marketing search, growth check) already stop at `x_daily_budget_usd` |
 | GeckoTerminal rate limited (many 429 in `[TIMING]`) | Free-tier limit on shared GitHub IPs | Normal; trending lists are cached 5 minutes. A keyed data provider would remove it |
 
 ## Operating the bot
@@ -45,3 +47,7 @@ How the bot runs, how to check it, and what to do when something breaks. Keep th
 - GeckoTerminal rate-limits GitHub's shared IPs; scans slow down when it does.
 - The early tier (new pairs) has weak results so far (see the weekly outcome DM); review `early_enabled` after a week of data.
 - Follower count is tiny; no tactic here replaces useful, consistent content and the owner's own engagement.
+
+## X API cost
+- A post containing a link costs about 13x a plain post, so **no post template contains a link** (a test enforces it). Put the Telegram link in the X bio and a pinned post once; posts say "Community: link in bio".
+- Reads are limited: marketing search 10 posts once a day, growth check 5 posts. Estimates are kept in `state/xspend-<date>`; prices are in `x_cost_usd` in `bot/config.json` (third-party figures, verify in the X console).

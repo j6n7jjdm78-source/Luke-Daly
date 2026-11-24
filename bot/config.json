@@ -28,7 +28,7 @@
   "cta_enabled": false,
   "community_link": "https://t.me/+pMCfTzv95v44YTZh",
   "cta_in_post": true,
-  "cta_text": "Follow for more call-outs. Community: {link}",
+  "cta_text": "Follow for more call-outs. Community link in bio.",
   "max_h1_change_pct": 60,
   "min_h1_change_pct": -10,
   "min_m5_change_pct": -8,
@@ -85,6 +85,7 @@
   "min_score": 40,
   "max_dump_from_high_pct": 25,
   "confirm_seconds": 100,
+  "watch_instant": ["EYdNHkBxARDvA3fcJ7P4d7N9ePsk44pvzHvguMFQpump"],
   "narrative_enabled": true,
   "narrative_entities": {
     "Elon Musk": [
@@ -120,5 +121,14 @@
     "Tim Cook": [
       "timcook"
     ]
+  },
+  "x_daily_budget_usd": 0.5,
+  "x_spend_alert_usd": 1.0,
+  "x_cost_usd": {
+    "post": 0.015,
+    "post_url": 0.2,
+    "media": 0.0,
+    "read": 0.005,
+    "own_read": 0.001
   }
 }
