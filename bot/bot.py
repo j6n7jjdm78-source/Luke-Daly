@@ -368,6 +368,24 @@ def publish_call(q, mc, liq, text, tier=""):
     owner_msg(f"🚀 NEW CALL #{n} ${sym}{' (EARLY)' if tier else ''} at {fmt(mc)}\nhttps://x.com/{CFG.get('handle', 'Cliperzcoins711')}/status/{tid}")
     cta_reply(tid, n)
 
+def watch_call():
+    """Owner-chosen coins (config `watch_instant`) that are not trading yet: the moment one has a pool with liquidity, call it out at once.
+    The owner chose to skip the safety gate for these, so the text says the coin is unchecked and new."""
+    wl = [c for c in CFG.get("watch_instant", []) if c]
+    if not wl or DRY: return
+    called = {r["contract"] for r in rows()}
+    for ca in [c for c in wl if c not in called]:
+        try: ps = http("https://api.dexscreener.com/tokens/v1/solana/" + ca) or []
+        except Exception: continue
+        ps = [q for q in ps if (q.get("baseToken") or {}).get("address") == ca and (q.get("liquidity") or {}).get("usd", 0) > 0 and (q.get("marketCap") or q.get("fdv") or 0) > 0]
+        if not ps: continue
+        q = max(ps, key=lambda x: x["liquidity"]["usd"]); mc = q.get("marketCap") or q.get("fdv"); liq = q["liquidity"]["usd"]
+        age = max(0.0, (time.time() * 1000 - (q.get("pairCreatedAt") or time.time() * 1000)) / 3600000)
+        q.setdefault("volume", {}).setdefault("h24", 0)
+        t = f"${q['baseToken']['symbol']} (Solana)\nMcap: {fmt(mc)} | Liq: {fmt(liq)} | Age: {age:.1f}h\nJust launched, NOT safety checked. High risk, can rug.\nCA: {ca}\n{COMMUNITY_LINE}"
+        owner_msg(f"👀 Watched coin ${q['baseToken']['symbol']} just appeared: calling it now (safety gate skipped by your choice).")
+        publish_call(q, mc, liq, t, tier="WATCH")
+
 def xlen(t):
     """Length as X counts it: every URL is 23 characters."""
     import re
@@ -1092,7 +1110,7 @@ if __name__ == "__main__":
     if os.environ.get("GITHUB_ACTIONS") != "true" and not DRY and os.environ.get("CLIPERZ_ALLOW_LOCAL") != "1":
         sys.exit("Only the GitHub Actions run may post (a second copy would fight it over the single-use X login). See RUNBOOK.md; set CLIPERZ_ALLOW_LOCAL=1 only when moving to a private server.")
     t_all = time.time(); times = {}
-    for stage in (track, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, telegram_actions, marketing_drafts, narrative_radar, weekly_analysis, scan_digest):   # one failing stage must not skip the rest
+    for stage in (track, watch_call, call_out, early_call_out, track_candidates, scoreboard, daily_recap, daily_lesson, daily_growth, telegram_actions, marketing_drafts, narrative_radar, weekly_analysis, scan_digest):   # one failing stage must not skip the rest
         t0 = time.time()
         try: stage()
         except Exception as e: print(f"[WARN] {stage.__name__} failed this cycle: {type(e).__name__}: {str(e)[:100]}")

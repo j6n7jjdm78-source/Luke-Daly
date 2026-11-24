@@ -514,3 +514,14 @@ def test_growth_and_marketing_reads_are_skipped_when_over_budget(monkeypatch):
     monkeypatch.setattr(bot, "now", bot.now.replace(hour=12)); monkeypatch.setattr(bot, "mk_quote_draft", lambda: None)
     bot.marketing_drafts()
     assert bot.SENT == []
+
+
+def test_watch_call_waits_for_a_pool_then_calls_once(monkeypatch):
+    ca = "WATCHCA" + "p" * 30; monkeypatch.setattr(bot, "DRY", False); monkeypatch.setitem(bot.CFG, "watch_instant", [ca])
+    calls = []; monkeypatch.setattr(bot, "publish_call", lambda q, mc, liq, text, tier="": calls.append((mc, liq, text, tier)))
+    monkeypatch.setattr(bot, "http", lambda *a, **k: [])
+    bot.watch_call(); assert calls == []                         # not trading yet
+    pair = {"baseToken": {"address": ca, "symbol": "NEW"}, "liquidity": {"usd": 9000}, "marketCap": 40000, "pairCreatedAt": int(time.time() * 1000)}
+    monkeypatch.setattr(bot, "http", lambda *a, **k: [pair])
+    bot.watch_call()
+    assert len(calls) == 1 and calls[0][3] == "WATCH" and "NOT safety checked" in calls[0][2] and ca in calls[0][2] and not bot.URL_RE.search(calls[0][2])
