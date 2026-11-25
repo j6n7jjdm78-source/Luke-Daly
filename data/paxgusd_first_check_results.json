@@ -1,0 +1,144 @@
+{
+ "params": {
+  "lookback": 120,
+  "pivot": 3,
+  "cluster": 1.5,
+  "min_touches": 3,
+  "atr_mult": 0.25,
+  "buffer": 0.3,
+  "max_stop": 3.5,
+  "min_stop": 0.5,
+  "rr": 1.5,
+  "h_from": 7,
+  "h_to": 16,
+  "max_trades_day": 10,
+  "max_losses_day": 2,
+  "daily_loss": 7.0
+ },
+ "runs": {
+  "5m|spread0.15_slip0.10": {
+   "span_hours": 60,
+   "stats": null,
+   "skipped": {
+    "wide": 0,
+    "tiny": 0,
+    "hours": 2,
+    "day_limit": 0,
+    "busy": 0
+   }
+  },
+  "5m|spread0.36_slip0.10": {
+   "span_hours": 60,
+   "stats": null,
+   "skipped": {
+    "wide": 0,
+    "tiny": 0,
+    "hours": 2,
+    "day_limit": 0,
+    "busy": 0
+   }
+  },
+  "5m|stress_spread0.36_slip0.20": {
+   "span_hours": 60,
+   "stats": null,
+   "skipped": {
+    "wide": 0,
+    "tiny": 0,
+    "hours": 2,
+    "day_limit": 0,
+    "busy": 0
+   }
+  },
+  "15m|spread0.15_slip0.10": {
+   "span_hours": 180,
+   "stats": null,
+   "skipped": {
+    "wide": 0,
+    "tiny": 0,
+    "hours": 1,
+    "day_limit": 0,
+    "busy": 0
+   }
+  },
+  "15m|spread0.36_slip0.10": {
+   "span_hours": 180,
+   "stats": null,
+   "skipped": {
+    "wide": 0,
+    "tiny": 0,
+    "hours": 1,
+    "day_limit": 0,
+    "busy": 0
+   }
+  },
+  "15m|stress_spread0.36_slip0.20": {
+   "span_hours": 180,
+   "stats": null,
+   "skipped": {
+    "wide": 0,
+    "tiny": 0,
+    "hours": 1,
+    "day_limit": 0,
+    "busy": 0
+   }
+  },
+  "1h|spread0.15_slip0.10": {
+   "span_hours": 719,
+   "stats": {
+    "n": 1,
+    "win": 1.0,
+    "pnl": 1.27,
+    "avg_r": 1.32,
+    "worst": 1.27,
+    "best": 1.27,
+    "max_dd": 0.0
+   },
+   "skipped": {
+    "wide": 0,
+    "tiny": 0,
+    "hours": 1,
+    "day_limit": 0,
+    "busy": 0
+   }
+  },
+  "1h|spread0.36_slip0.10": {
+   "span_hours": 719,
+   "stats": {
+    "n": 1,
+    "win": 1.0,
+    "pnl": 1.32,
+    "avg_r": 1.24,
+    "worst": 1.32,
+    "best": 1.32,
+    "max_dd": 0.0
+   },
+   "skipped": {
+    "wide": 0,
+    "tiny": 0,
+    "hours": 1,
+    "day_limit": 0,
+    "busy": 0
+   },
+   "random_baseline_avg_r_mean": -0.19
+  },
+  "1h|stress_spread0.36_slip0.20": {
+   "span_hours": 719,
+   "stats": {
+    "n": 1,
+    "win": 0.0,
+    "pnl": -0.14,
+    "avg_r": -0.12,
+    "worst": -0.14,
+    "best": -0.14,
+    "max_dd": 0.14
+   },
+   "skipped": {
+    "wide": 0,
+    "tiny": 0,
+    "hours": 1,
+    "day_limit": 0,
+    "busy": 0
+   }
+  }
+ }
+}

@@ -15,3 +15,12 @@ state/*
 !state/lesson_idx
 !state/recap-*
 !state/growth-*
+
+# runtime files (gold bot)
+gold/bot.log
+gold/alerts.log
+gold/state.json
+gold/heartbeat.txt
+gold/replay_*
+data/replay_live_trades.csv
+__pycache__/

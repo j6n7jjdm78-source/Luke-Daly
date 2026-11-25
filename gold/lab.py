@@ -1,8 +1,8 @@
 """Scout (S/R levels + rejection setup) and a paper simulator for gold proxy data. Stdlib only.
 Paper only. No lookahead: levels use only closed 1h bars; entry is the NEXT bar open after a closed signal bar.
-Run: python3 -I bot/lab.py
+Run: python3 -I gold/lab.py
 """
-import csv, json, os, random, statistics
+import csv, json, os, random, statistics, sys
 from datetime import datetime, timezone
 
 D = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
@@ -15,12 +15,24 @@ P = dict(lookback=120, pivot=3, cluster=1.50, min_touches=3, atr_mult=0.25, buff
 
 def load(tf):
     rows = []
-    with open(os.path.join(D, f"paxgusd_{tf}.csv")) as f:
+    with open(os.path.join(D, f"{PREFIX}_{tf}.csv")) as f:
         for r in csv.DictReader(f):
             rows.append(dict(ts=int(r["ts"]), o=float(r["open"]), h=float(r["high"]), l=float(r["low"]), c=float(r["close"])))
     return rows
 
-H1, M15 = load("1h"), load("15m")
+PREFIX, H1, M15 = "paxgusd", [], []
+
+def init(prefix):
+    """Load CSVs data/<prefix>_{1h,15m}.csv (e.g. paxgusd, xauusd)."""
+    global PREFIX, H1, M15
+    PREFIX = prefix; H1, M15 = load("1h"), load("15m"); _cache.clear()
+
+def set_data(h1, m15):
+    """Live use: replace candle history (closed bars only, dicts with ts,o,h,l,c)."""
+    global H1, M15
+    H1, M15 = h1, m15; _cache.clear()
+
+_cache = {}
 
 def atr15(t, n=14):
     bars = [b for b in M15 if b["ts"] + 900 <= t][-(n + 1):]
@@ -28,7 +40,6 @@ def atr15(t, n=14):
     trs = [max(b["h"] - b["l"], abs(b["h"] - p["c"]), abs(b["l"] - p["c"])) for p, b in zip(bars, bars[1:])]
     return sum(trs) / len(trs)
 
-_cache = {}
 def levels_at(t):
     """Valid S/R levels from closed 1h bars only. Pivot needs `pivot` closed bars on the right."""
     key = t // 3600
@@ -124,6 +135,7 @@ def stats(tr):
                 best=round(max(pn), 2), max_dd=round(dd, 2))
 
 if __name__ == "__main__":
+    init(sys.argv[1] if len(sys.argv) > 1 else "paxgusd")
     out = dict(params=P, runs={})
     # Scout snapshot: current levels
     t_now = H1[-1]["ts"] + 3600
@@ -131,7 +143,7 @@ if __name__ == "__main__":
     last = M15[-1]["c"]
     snap = dict(as_of=datetime.fromtimestamp(t_now, timezone.utc).isoformat(), last_price=last, zone_halfwidth=round(z, 2),
                 levels=[dict(price=round(p, 2), touches=n, side="support" if p < last else "resistance") for p, n in sorted(lv)])
-    json.dump(snap, open(os.path.join(D, "levels_latest.json"), "w"), indent=1)
+    json.dump(snap, open(os.path.join(D, f"{PREFIX}_levels_latest.json"), "w"), indent=1)
     print("SCOUT levels now:", json.dumps(snap, indent=1))
     for tf in ("5m", "15m", "1h"):
         bars = load(tf)
@@ -145,7 +157,7 @@ if __name__ == "__main__":
                     rt, _ = simulate(bars, tf, sp, sl, "random", random.Random(s))
                     if rt: rr.append(statistics.mean(t["r"] for t in rt))
                 res["random_baseline_avg_r_mean"] = round(statistics.mean(rr), 2) if rr else None
-                json.dump(tr, open(os.path.join(D, f"trades_{tf}.json"), "w"), indent=1)
+                json.dump(tr, open(os.path.join(D, f"{PREFIX}_trades_{tf}.json"), "w"), indent=1)
             out["runs"][f"{tf}|{name}"] = res
             print(tf, name, json.dumps(res))
-    json.dump(out, open(os.path.join(D, "first_check_results.json"), "w"), indent=1)
+    json.dump(out, open(os.path.join(D, f"{PREFIX}_first_check_results.json"), "w"), indent=1)

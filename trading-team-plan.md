@@ -139,3 +139,6 @@ Duplicate orders, missed stop, wrong position size, stale price feed, API timeou
 - Margin for 1 oz at ~3630 is about $36 at 1:100 leverage, about $121 at 1:30 (more than EUR 100). Leverage must be 1:100 or higher on the demo.
 
 Confirmed from the second spec screenshot: contract size 100, digits 2, tick size 0.01, stops level 0, margin/profit currency USD, floating spread. Leverage still unconfirmed.
+
+## Update: Windows PC available
+Windows PC route is now in the repo: see WINDOWS_SETUP.md. gold/mt5_export.py exports real XAUUSD history, gold/lab.py backtests it (`py gold\lab.py xauusd`), gold/paper_bot.py runs Scout, Shield, Pilot and Journal on the MT5 demo account, gold/test_bot.py holds the safety tests.

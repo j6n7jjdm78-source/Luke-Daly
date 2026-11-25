@@ -16,4 +16,4 @@ Random-entry baseline (1h, 1 trade): avg -0.19 R. Meaningless at n=1.
 Verdict: NO VERDICT. 0 to 2 trades is an anecdote. Need 50+ out-of-sample trades.
 Finding: with the spec rules the strategy produces almost no signals on 30 days of data, nowhere near 5-10 trades a day.
 
-Files: bot/lab.py (Scout + simulator), data/levels_latest.json, data/first_check_results.json, data/trades_*.json.
+Files: gold/lab.py (Scout + simulator), data/levels_latest.json, data/first_check_results.json, data/trades_*.json.
