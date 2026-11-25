@@ -14,5 +14,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pytest
-      - run: python -m pytest tests/test_cliperz_bot.py tests/test_watchdog.py tests/test_narrative.py tests/test_backtest.py -q
+      - run: pip install pytest pyyaml
+      - run: python deploy/selfcheck.py     # compile, workflows, config, no-link templates, secrets scan, all tests, dry run of every stage

@@ -51,3 +51,6 @@ How the bot runs, how to check it, and what to do when something breaks. Keep th
 ## X API cost
 - A post containing a link costs about 13x a plain post, so **no post template contains a link** (a test enforces it). Put the Telegram link in the X bio and a pinned post once; posts say "Community: link in bio".
 - Reads are limited: marketing search 10 posts once a day, growth check 5 posts. Estimates are kept in `state/xspend-<date>`; prices are in `x_cost_usd` in `bot/config.json` (third-party figures, verify in the X console).
+
+## Check everything before sending anything back
+`python3 deploy/selfcheck.py` (offline) or `python3 deploy/selfcheck.py --live` (adds read-only reachability checks). It compiles all code, parses workflows, validates config, checks no post template has a link, scans for secrets, runs every test and dry-runs every stage with the network switched off. It runs automatically on every pull request (tests workflow). Exit code 1 means something failed.
